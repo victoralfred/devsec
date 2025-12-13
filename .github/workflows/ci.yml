@@ -93,3 +93,43 @@ jobs:
             exit 1
           fi
           echo "No prohibited file I/O found."
+
+  notify:
+    name: Slack Notification
+    runs-on: ubuntu-latest
+    needs: [lint, security, test, build, verify-safepath]
+    if: always()
+    steps:
+      - name: Send Slack notification
+        run: |
+          if [ "${{ needs.lint.result }}" == "success" ] && \
+             [ "${{ needs.security.result }}" == "success" ] && \
+             [ "${{ needs.test.result }}" == "success" ] && \
+             [ "${{ needs.build.result }}" == "success" ] && \
+             [ "${{ needs.verify-safepath.result }}" == "success" ]; then
+            STATUS="success"
+            COLOR="good"
+            TEXT="All CI checks passed for devsec"
+          else
+            STATUS="failure"
+            COLOR="danger"
+            TEXT="CI checks failed for devsec"
+          fi
+
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{
+              \"attachments\": [{
+                \"color\": \"$COLOR\",
+                \"title\": \"CI Pipeline $STATUS\",
+                \"text\": \"$TEXT\",
+                \"fields\": [
+                  {\"title\": \"Repository\", \"value\": \"${{ github.repository }}\", \"short\": true},
+                  {\"title\": \"Branch\", \"value\": \"${{ github.ref_name }}\", \"short\": true},
+                  {\"title\": \"Commit\", \"value\": \"${{ github.sha }}\", \"short\": true},
+                  {\"title\": \"Actor\", \"value\": \"${{ github.actor }}\", \"short\": true}
+                ],
+                \"footer\": \"GitHub Actions\",
+                \"ts\": $(date +%s)
+              }]
+            }" \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
