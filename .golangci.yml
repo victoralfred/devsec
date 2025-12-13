@@ -78,13 +78,14 @@ linters:
         - name: superfluous-else
         - name: unreachable-code
 
-issues:
-  exclude-use-default: false
-  max-issues-per-linter: 0
-  max-same-issues: 0
+output:
+  show-stats: true
 
-  exclude-rules:
-    - path: _test\.go
-      linters:
+exclusions:
+  paths:
+    - _test\.go
+  rules:
+    - linters:
         - errcheck
         - gosec
+      path: _test\.go
