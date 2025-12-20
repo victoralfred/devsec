@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/victoralfred/devsec/internal/model"
 	"github.com/victoralfred/devsec/internal/scanner/gitleaks"
+	"github.com/victoralfred/devsec/internal/scanner/semgrep"
 	"github.com/victoralfred/gowritter/safepath"
 )
 
@@ -23,6 +24,9 @@ var (
 // ErrSecretsFound is returned when secrets are found during a scan.
 var ErrSecretsFound = errors.New("secrets found")
 
+// ErrVulnerabilitiesFound is returned when vulnerabilities are found during a scan.
+var ErrVulnerabilitiesFound = errors.New("vulnerabilities found")
+
 // NewScanCmd creates the scan command.
 func NewScanCmd() *cobra.Command {
 	scanCmd := &cobra.Command{
@@ -32,6 +36,7 @@ func NewScanCmd() *cobra.Command {
 	}
 
 	scanCmd.AddCommand(NewScanSecretsCmd())
+	scanCmd.AddCommand(NewScanSastCmd())
 
 	return scanCmd
 }
@@ -179,6 +184,68 @@ func writeToFile(path string, data []byte) error {
 
 	if err := sp.WriteFile(filename, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
+}
+
+// NewScanSastCmd creates the scan sast subcommand.
+func NewScanSastCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sast [path]",
+		Short: "Scan for security issues using Semgrep",
+		Long: `Scan the specified directory for security vulnerabilities
+using Semgrep static application security testing (SAST).
+
+If no path is specified, the current directory is scanned.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runScanSast,
+	}
+
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "output format (text, json)")
+	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "output file (default is stdout)")
+	cmd.Flags().DurationVarP(&timeout, "timeout", "t", 10*time.Minute, "scan timeout")
+
+	return cmd
+}
+
+func runScanSast(cmd *cobra.Command, args []string) error {
+	targetPath := "."
+	if len(args) > 0 {
+		targetPath = args[0]
+	}
+
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve path: %w", err)
+	}
+
+	scanner := semgrep.New(
+		semgrep.WithTimeout(timeout),
+	)
+	defer func() {
+		closeErr := scanner.Close(context.Background())
+		_ = closeErr
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if verbose {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Scanning %s for vulnerabilities...\n", absPath)
+	}
+
+	findings, err := scanner.Scan(ctx, absPath)
+	if err != nil {
+		return fmt.Errorf("scan failed: %w", err)
+	}
+
+	if err := outputResults(cmd, findings); err != nil {
+		return fmt.Errorf("failed to output results: %w", err)
+	}
+
+	if len(findings) > 0 {
+		return ErrVulnerabilitiesFound
 	}
 
 	return nil
