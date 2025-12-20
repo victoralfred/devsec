@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -19,6 +20,9 @@ const DefaultBinaryPath = "/usr/bin/semgrep"
 
 // DefaultTimeout is the default timeout for semgrep execution.
 const DefaultTimeout = 10 * time.Minute
+
+// MaxReportSize is the maximum size of a report file in bytes (100MB).
+const MaxReportSize = 100 * 1024 * 1024
 
 // Scanner implements the scanner.Scanner interface for Semgrep.
 type Scanner struct {
@@ -90,41 +94,74 @@ func (s *Scanner) Name() string {
 
 // Scan executes semgrep and returns findings.
 func (s *Scanner) Scan(ctx context.Context, path string) ([]model.Finding, error) {
+	// Validate input path
+	if path == "" {
+		return nil, fmt.Errorf("path cannot be empty")
+	}
+
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
 
-	reportFile := s.generateReportPath()
+	// Check if path exists and is a directory
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("path does not exist: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path must be a directory: %s", absPath)
+	}
+
+	reportFile, cleanup, err := s.generateReportPath()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate report path: %w", err)
+	}
+	defer func() {
+		// Use context with short timeout for cleanup
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if cleanupErr := cleanup(cleanupCtx); cleanupErr != nil {
+			// Best-effort cleanup, log but don't fail
+			_ = cleanupErr
+		}
+	}()
+
+	// Check for context cancellation before execution
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled: %w", err)
+	}
 
 	execErr := s.executeSemgrep(ctx, absPath, reportFile)
 	if execErr != nil {
-		// Cleanup is best-effort, don't fail on error.
-		cleanupErr := s.cleanupReport(reportFile)
-		_ = cleanupErr
 		return nil, fmt.Errorf("failed to execute semgrep: %w", execErr)
 	}
 
-	findings, err := s.parseReport(reportFile)
-	if err != nil {
-		// Cleanup is best-effort, don't fail on error.
-		cleanupErr := s.cleanupReport(reportFile)
-		_ = cleanupErr
-		return nil, fmt.Errorf("failed to parse semgrep report: %w", err)
+	// Check for context cancellation before parsing
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
-	// Cleanup is best-effort, don't fail on error.
-	cleanupErr := s.cleanupReport(reportFile)
-	_ = cleanupErr
+	findings, err := s.parseReport(ctx, reportFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse semgrep report: %w", err)
+	}
 
 	return findings, nil
 }
 
 // generateReportPath generates a unique temporary file path for the SARIF report.
-func (s *Scanner) generateReportPath() string {
-	tmpDir := "/tmp"
+// Returns the report path and a cleanup function.
+func (s *Scanner) generateReportPath() (string, func(context.Context) error, error) {
+	tmpDir := os.TempDir()
 	reportID := uuid.New().String()
-	return filepath.Join(tmpDir, fmt.Sprintf("semgrep-report-%s.sarif", reportID))
+	reportFile := filepath.Join(tmpDir, fmt.Sprintf("semgrep-report-%s.sarif", reportID))
+
+	cleanup := func(ctx context.Context) error {
+		return s.cleanupReport(reportFile)
+	}
+
+	return reportFile, cleanup, nil
 }
 
 // executeSemgrep runs the semgrep command.
@@ -165,7 +202,7 @@ func (s *Scanner) executeSemgrep(ctx context.Context, path, reportFile string) e
 }
 
 // parseReport reads and parses the SARIF report.
-func (s *Scanner) parseReport(reportFile string) ([]model.Finding, error) {
+func (s *Scanner) parseReport(ctx context.Context, reportFile string) ([]model.Finding, error) {
 	dir := filepath.Dir(reportFile)
 	filename := filepath.Base(reportFile)
 
@@ -174,9 +211,23 @@ func (s *Scanner) parseReport(reportFile string) ([]model.Finding, error) {
 		return nil, fmt.Errorf("failed to create safe path: %w", err)
 	}
 
+	// Check file size before reading
+	info, err := sp.Stat(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat report file: %w", err)
+	}
+	if info.Size() > MaxReportSize {
+		return nil, fmt.Errorf("report file too large: %d bytes (max %d)", info.Size(), MaxReportSize)
+	}
+
 	data, err := sp.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read report file: %w", err)
+	}
+
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
 	if len(data) == 0 {
@@ -206,7 +257,13 @@ func (s *Scanner) cleanupReport(reportFile string) error {
 
 // mapFindings converts SARIF results to model.Finding.
 func (s *Scanner) mapFindings(sarif SARIFReport) []model.Finding {
-	var findings []model.Finding
+	// Pre-allocate slice with estimated capacity
+	totalResults := 0
+	for i := range sarif.Runs {
+		totalResults += len(sarif.Runs[i].Results)
+	}
+
+	findings := make([]model.Finding, 0, totalResults)
 
 	for i := range sarif.Runs {
 		run := &sarif.Runs[i]
@@ -225,7 +282,11 @@ func (s *Scanner) mapResult(result *SARIFResult, run *SARIFRun) model.Finding {
 	location := s.extractLocation(result)
 	description := s.buildDescription(result, run)
 
+	// Generate unique ID for finding
+	findingID := s.generateFindingID(result, location)
+
 	return model.Finding{
+		ID:          findingID,
 		Scanner:     "semgrep",
 		Rule:        result.RuleID,
 		Title:       s.getRuleMessage(result, run),
@@ -233,6 +294,17 @@ func (s *Scanner) mapResult(result *SARIFResult, run *SARIFRun) model.Finding {
 		Severity:    severity,
 		Location:    location,
 	}
+}
+
+// generateFindingID generates a unique ID for a finding.
+func (s *Scanner) generateFindingID(result *SARIFResult, location model.Location) string {
+	// Use rule ID, file, and line number to create a deterministic ID
+	id := fmt.Sprintf("%s:%s:%d", result.RuleID, location.File, location.StartLine)
+	if location.EndLine != location.StartLine {
+		id = fmt.Sprintf("%s:%d-%d", id, location.StartLine, location.EndLine)
+	}
+	// Add UUID suffix for uniqueness
+	return fmt.Sprintf("%s-%s", id, uuid.New().String()[:8])
 }
 
 // mapSeverity converts SARIF severity level to model.Severity.

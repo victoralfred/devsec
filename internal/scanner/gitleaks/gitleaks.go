@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -109,11 +111,32 @@ func (s *Scanner) Name() string {
 
 // Scan performs a secret detection scan on the given path.
 func (s *Scanner) Scan(ctx context.Context, targetPath string) ([]model.Finding, error) {
-	reportFile := filepath.Join(targetPath, fmt.Sprintf(".gitleaks-report-%s.json", uuid.New().String()))
+	// Validate input path
+	if targetPath == "" {
+		return nil, fmt.Errorf("target path cannot be empty")
+	}
+
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve path: %w", err)
+	}
+
+	// Check if path exists and is a directory
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("path does not exist: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path must be a directory: %s", absPath)
+	}
+
+	// Use temp directory instead of targetPath for report file
+	tmpDir := os.TempDir()
+	reportFile := filepath.Join(tmpDir, fmt.Sprintf("gitleaks-report-%s.json", uuid.New().String()))
 
 	args := []string{
 		"detect",
-		"--source", targetPath,
+		"--source", absPath,
 		"--report-format", "json",
 		"--report-path", reportFile,
 		"--exit-code", "0",
@@ -130,29 +153,45 @@ func (s *Scanner) Scan(ctx context.Context, targetPath string) ([]model.Finding,
 		return nil, fmt.Errorf("failed to build command: %w", err)
 	}
 
+	// Check for context cancellation before execution
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled: %w", err)
+	}
+
 	result, err := s.executor.Execute(ctx, cmd)
 	if err != nil {
+		// Cleanup on error
+		_ = s.cleanupReport(reportFile)
 		return nil, fmt.Errorf("failed to execute gitleaks: %w", err)
 	}
 
 	if !result.Success() && result.ExitCode != 1 {
+		// Cleanup on error
+		_ = s.cleanupReport(reportFile)
 		return nil, fmt.Errorf("gitleaks failed with exit code %d: %s", result.ExitCode, result.StderrString())
 	}
 
-	findings, err := s.parseReport(reportFile)
+	// Check for context cancellation before parsing
+	if err := ctx.Err(); err != nil {
+		_ = s.cleanupReport(reportFile)
+		return nil, fmt.Errorf("context cancelled: %w", err)
+	}
+
+	findings, err := s.parseReport(ctx, reportFile)
 	if err != nil {
+		// Cleanup on error
+		_ = s.cleanupReport(reportFile)
 		return nil, fmt.Errorf("failed to parse report: %w", err)
 	}
 
 	// Cleanup is best-effort, don't fail on error.
-	cleanupErr := s.cleanupReport(reportFile)
-	_ = cleanupErr
+	_ = s.cleanupReport(reportFile)
 
 	return findings, nil
 }
 
 // parseReport reads and parses the Gitleaks JSON report.
-func (s *Scanner) parseReport(reportPath string) ([]model.Finding, error) {
+func (s *Scanner) parseReport(ctx context.Context, reportPath string) ([]model.Finding, error) {
 	dir := filepath.Dir(reportPath)
 	filename := filepath.Base(reportPath)
 
@@ -161,9 +200,24 @@ func (s *Scanner) parseReport(reportPath string) ([]model.Finding, error) {
 		return nil, fmt.Errorf("failed to create safe path: %w", err)
 	}
 
+	// Check file size before reading
+	info, err := sp.Stat(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat report file: %w", err)
+	}
+	const MaxReportSize = 100 * 1024 * 1024 // 100MB
+	if info.Size() > MaxReportSize {
+		return nil, fmt.Errorf("report file too large: %d bytes (max %d)", info.Size(), MaxReportSize)
+	}
+
 	data, err := sp.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read report file: %w", err)
+	}
+
+	// Check for context cancellation
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
 	if len(data) == 0 {
@@ -206,14 +260,25 @@ func (s *Scanner) mapFindings(gitleaksFindings []Finding) []model.Finding {
 
 // buildDescription creates a detailed description for the finding.
 func buildDescription(gf *Finding) string {
-	desc := fmt.Sprintf("Secret detected by rule '%s'", gf.RuleID)
+	var builder strings.Builder
+	builder.Grow(200) // Pre-allocate estimated capacity
+
+	builder.WriteString("Secret detected by rule '")
+	builder.WriteString(gf.RuleID)
+	builder.WriteString("'")
+
 	if gf.Commit != "" {
-		desc += fmt.Sprintf(" in commit %s", gf.Commit[:minInt(8, len(gf.Commit))])
+		commitLen := minInt(8, len(gf.Commit))
+		builder.WriteString(" in commit ")
+		builder.WriteString(gf.Commit[:commitLen])
 	}
+
 	if gf.Author != "" {
-		desc += fmt.Sprintf(" by %s", gf.Author)
+		builder.WriteString(" by ")
+		builder.WriteString(gf.Author)
 	}
-	return desc
+
+	return builder.String()
 }
 
 // cleanupReport removes the temporary report file.

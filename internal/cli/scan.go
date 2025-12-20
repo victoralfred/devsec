@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -78,9 +79,17 @@ func runScanSecrets(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create scanner: %w", err)
 	}
+
+	// Create context with timeout for cleanup
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cleanupCancel()
+
 	defer func() {
-		closeErr := scanner.Close(context.Background())
-		_ = closeErr
+		closeErr := scanner.Close(cleanupCtx)
+		if closeErr != nil {
+			// Log but don't fail on cleanup error
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to close scanner: %v\n", closeErr)
+		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -154,20 +163,23 @@ func outputText(cmd *cobra.Command, findings []model.Finding) error {
 	}
 
 	if outputFile != "" {
-		var textOutput string
-		textOutput = fmt.Sprintf("Found %d secret(s):\n\n", len(findings))
+		// Use strings.Builder for efficient string building
+		var builder strings.Builder
+		builder.Grow(len(findings) * 200) // Pre-allocate estimated capacity
+
+		_, _ = fmt.Fprintf(&builder, "Found %d secret(s):\n\n", len(findings))
 		for i := range findings {
 			f := &findings[i]
-			textOutput += fmt.Sprintf("[%d] %s\n", i+1, f.Title)
-			textOutput += fmt.Sprintf("    Rule:     %s\n", f.Rule)
-			textOutput += fmt.Sprintf("    Severity: %s\n", f.Severity)
-			textOutput += fmt.Sprintf("    File:     %s:%d\n", f.Location.File, f.Location.StartLine)
+			_, _ = fmt.Fprintf(&builder, "[%d] %s\n", i+1, f.Title)
+			_, _ = fmt.Fprintf(&builder, "    Rule:     %s\n", f.Rule)
+			_, _ = fmt.Fprintf(&builder, "    Severity: %s\n", f.Severity)
+			_, _ = fmt.Fprintf(&builder, "    File:     %s:%d\n", f.Location.File, f.Location.StartLine)
 			if f.Description != "" {
-				textOutput += fmt.Sprintf("    Details:  %s\n", f.Description)
+				_, _ = fmt.Fprintf(&builder, "    Details:  %s\n", f.Description)
 			}
-			textOutput += "\n"
+			_, _ = fmt.Fprintln(&builder)
 		}
-		return writeToFile(outputFile, []byte(textOutput))
+		return writeToFile(outputFile, []byte(builder.String()))
 	}
 
 	return nil
@@ -223,9 +235,17 @@ func runScanSast(cmd *cobra.Command, args []string) error {
 	scanner := semgrep.New(
 		semgrep.WithTimeout(timeout),
 	)
+
+	// Create context with timeout for cleanup
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cleanupCancel()
+
 	defer func() {
-		closeErr := scanner.Close(context.Background())
-		_ = closeErr
+		closeErr := scanner.Close(cleanupCtx)
+		if closeErr != nil {
+			// Log but don't fail on cleanup error
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to close scanner: %v\n", closeErr)
+		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
