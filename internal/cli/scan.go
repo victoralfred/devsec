@@ -13,6 +13,7 @@ import (
 	"github.com/victoralfred/devsec/internal/model"
 	"github.com/victoralfred/devsec/internal/scanner/gitleaks"
 	"github.com/victoralfred/devsec/internal/scanner/semgrep"
+	"github.com/victoralfred/devsec/internal/scanner/trivy"
 	"github.com/victoralfred/gowritter/safepath"
 )
 
@@ -38,6 +39,7 @@ func NewScanCmd() *cobra.Command {
 
 	scanCmd.AddCommand(NewScanSecretsCmd())
 	scanCmd.AddCommand(NewScanSastCmd())
+	scanCmd.AddCommand(NewScanVulnerabilitiesCmd())
 
 	return scanCmd
 }
@@ -266,6 +268,131 @@ func runScanSast(cmd *cobra.Command, args []string) error {
 
 	if len(findings) > 0 {
 		return ErrVulnerabilitiesFound
+	}
+
+	return nil
+}
+
+// NewScanVulnerabilitiesCmd creates the scan vulnerabilities subcommand.
+func NewScanVulnerabilitiesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "vulnerabilities [path]",
+		Short: "Scan for vulnerabilities using Trivy",
+		Long: `Scan the specified directory for dependency and container vulnerabilities
+using Trivy vulnerability scanner.
+
+If no path is specified, the current directory is scanned.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runScanVulnerabilities,
+	}
+
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "output format (text, json)")
+	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "output file (default is stdout)")
+	cmd.Flags().DurationVarP(&timeout, "timeout", "t", 10*time.Minute, "scan timeout")
+
+	return cmd
+}
+
+func runScanVulnerabilities(cmd *cobra.Command, args []string) error {
+	targetPath := "."
+	if len(args) > 0 {
+		targetPath = args[0]
+	}
+
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve path: %w", err)
+	}
+
+	scanner := trivy.New(
+		trivy.WithTimeout(timeout),
+	)
+
+	// Create context with timeout for cleanup
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cleanupCancel()
+
+	defer func() {
+		closeErr := scanner.Close(cleanupCtx)
+		if closeErr != nil {
+			// Log but don't fail on cleanup error
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to close scanner: %v\n", closeErr)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if verbose {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Scanning %s for dependency vulnerabilities...\n", absPath)
+	}
+
+	findings, err := scanner.Scan(ctx, absPath)
+	if err != nil {
+		return fmt.Errorf("scan failed: %w", err)
+	}
+
+	if err := outputVulnerabilityResults(cmd, findings); err != nil {
+		return fmt.Errorf("failed to output results: %w", err)
+	}
+
+	if len(findings) > 0 {
+		return ErrVulnerabilitiesFound
+	}
+
+	return nil
+}
+
+func outputVulnerabilityResults(cmd *cobra.Command, findings []model.Finding) error {
+	switch outputFormat {
+	case "json":
+		return outputJSON(cmd, findings)
+	case "text":
+		return outputVulnerabilityText(cmd, findings)
+	default:
+		return fmt.Errorf("unknown format: %s", outputFormat)
+	}
+}
+
+func outputVulnerabilityText(cmd *cobra.Command, findings []model.Finding) error {
+	out := cmd.OutOrStdout()
+
+	if len(findings) == 0 {
+		_, _ = fmt.Fprintln(out, "No vulnerabilities found.")
+		return nil
+	}
+
+	_, _ = fmt.Fprintf(out, "Found %d vulnerability(ies):\n\n", len(findings))
+
+	for i := range findings {
+		f := &findings[i]
+		_, _ = fmt.Fprintf(out, "[%d] %s\n", i+1, f.Title)
+		_, _ = fmt.Fprintf(out, "    CVE:      %s\n", f.Rule)
+		_, _ = fmt.Fprintf(out, "    Severity: %s\n", f.Severity)
+		_, _ = fmt.Fprintf(out, "    File:     %s\n", f.Location.File)
+		if f.Description != "" {
+			_, _ = fmt.Fprintf(out, "    Details:  %s\n", f.Description)
+		}
+		_, _ = fmt.Fprintln(out)
+	}
+
+	if outputFile != "" {
+		var builder strings.Builder
+		builder.Grow(len(findings) * 250)
+
+		_, _ = fmt.Fprintf(&builder, "Found %d vulnerability(ies):\n\n", len(findings))
+		for i := range findings {
+			f := &findings[i]
+			_, _ = fmt.Fprintf(&builder, "[%d] %s\n", i+1, f.Title)
+			_, _ = fmt.Fprintf(&builder, "    CVE:      %s\n", f.Rule)
+			_, _ = fmt.Fprintf(&builder, "    Severity: %s\n", f.Severity)
+			_, _ = fmt.Fprintf(&builder, "    File:     %s\n", f.Location.File)
+			if f.Description != "" {
+				_, _ = fmt.Fprintf(&builder, "    Details:  %s\n", f.Description)
+			}
+			_, _ = fmt.Fprintln(&builder)
+		}
+		return writeToFile(outputFile, []byte(builder.String()))
 	}
 
 	return nil
