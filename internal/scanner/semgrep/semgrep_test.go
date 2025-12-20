@@ -266,7 +266,8 @@ func TestParseReport(t *testing.T) {
 	}()
 
 	fullPath := filepath.Join(tmpDir, tmpFile)
-	findings, err := scanner.parseReport(fullPath)
+	ctx := context.Background()
+	findings, err := scanner.parseReport(ctx, fullPath)
 	if err != nil {
 		t.Fatalf("parseReport() error = %v", err)
 	}
@@ -302,7 +303,8 @@ func TestParseReportEmpty(t *testing.T) {
 	}()
 
 	fullPath := filepath.Join(tmpDir, tmpFile)
-	findings, err := scanner.parseReport(fullPath)
+	ctx := context.Background()
+	findings, err := scanner.parseReport(ctx, fullPath)
 	if err != nil {
 		t.Fatalf("parseReport() error = %v", err)
 	}
@@ -354,7 +356,8 @@ func TestParseReportEmptyResults(t *testing.T) {
 	}()
 
 	fullPath := filepath.Join(tmpDir, tmpFile)
-	findings, err := scanner.parseReport(fullPath)
+	ctx := context.Background()
+	findings, err := scanner.parseReport(ctx, fullPath)
 	if err != nil {
 		t.Fatalf("parseReport() error = %v", err)
 	}
@@ -386,7 +389,8 @@ func TestParseReportInvalidJSON(t *testing.T) {
 	}()
 
 	fullPath := filepath.Join(tmpDir, tmpFile)
-	_, err = scanner.parseReport(fullPath)
+	ctx := context.Background()
+	_, err = scanner.parseReport(ctx, fullPath)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON, got nil")
 	}
@@ -396,7 +400,8 @@ func TestParseReportFileNotFound(t *testing.T) {
 	scanner := New()
 	defer closeScanner(t, scanner)
 
-	_, err := scanner.parseReport("/nonexistent/path/report.sarif")
+	ctx := context.Background()
+	_, err := scanner.parseReport(ctx, "/nonexistent/path/report.sarif")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file, got nil")
 	}

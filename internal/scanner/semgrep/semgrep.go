@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -104,19 +103,20 @@ func (s *Scanner) Scan(ctx context.Context, path string) ([]model.Finding, error
 		return nil, fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
 
-	// Check if path exists and is a directory
-	info, err := os.Stat(absPath)
+	// Check if path exists and is a directory using safepath
+	sp, err := safepath.New(absPath)
 	if err != nil {
-		return nil, fmt.Errorf("path does not exist: %w", err)
+		return nil, fmt.Errorf("path does not exist or is not accessible: %w", err)
+	}
+	info, err := sp.Stat(".")
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat path: %w", err)
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("path must be a directory: %s", absPath)
 	}
 
-	reportFile, cleanup, err := s.generateReportPath()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate report path: %w", err)
-	}
+	reportFile, cleanup := s.generateReportPath()
 	defer func() {
 		// Use context with short timeout for cleanup
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -128,8 +128,8 @@ func (s *Scanner) Scan(ctx context.Context, path string) ([]model.Finding, error
 	}()
 
 	// Check for context cancellation before execution
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("context canceled: %w", ctxErr)
 	}
 
 	execErr := s.executeSemgrep(ctx, absPath, reportFile)
@@ -138,8 +138,8 @@ func (s *Scanner) Scan(ctx context.Context, path string) ([]model.Finding, error
 	}
 
 	// Check for context cancellation before parsing
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("context canceled: %w", ctxErr)
 	}
 
 	findings, err := s.parseReport(ctx, reportFile)
@@ -150,18 +150,20 @@ func (s *Scanner) Scan(ctx context.Context, path string) ([]model.Finding, error
 	return findings, nil
 }
 
+// DefaultTempDir is the default temporary directory for report files.
+const DefaultTempDir = "/tmp"
+
 // generateReportPath generates a unique temporary file path for the SARIF report.
 // Returns the report path and a cleanup function.
-func (s *Scanner) generateReportPath() (string, func(context.Context) error, error) {
-	tmpDir := os.TempDir()
+func (s *Scanner) generateReportPath() (reportPath string, cleanupFn func(context.Context) error) {
 	reportID := uuid.New().String()
-	reportFile := filepath.Join(tmpDir, fmt.Sprintf("semgrep-report-%s.sarif", reportID))
+	reportPath = filepath.Join(DefaultTempDir, fmt.Sprintf("semgrep-report-%s.sarif", reportID))
 
-	cleanup := func(ctx context.Context) error {
-		return s.cleanupReport(reportFile)
+	cleanupFn = func(ctx context.Context) error {
+		return s.cleanupReport(reportPath)
 	}
 
-	return reportFile, cleanup, nil
+	return reportPath, cleanupFn
 }
 
 // executeSemgrep runs the semgrep command.
@@ -227,7 +229,7 @@ func (s *Scanner) parseReport(ctx context.Context, reportFile string) ([]model.F
 
 	// Check for context cancellation
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
+		return nil, fmt.Errorf("context canceled: %w", err)
 	}
 
 	if len(data) == 0 {

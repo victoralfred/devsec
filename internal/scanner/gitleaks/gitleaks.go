@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,6 +20,9 @@ const DefaultBinaryPath = "/usr/bin/gitleaks"
 
 // DefaultTimeout is the default timeout for gitleaks execution.
 const DefaultTimeout = 5 * time.Minute
+
+// DefaultTempDir is the default temporary directory for report files.
+const DefaultTempDir = "/tmp"
 
 // Finding represents a single finding from Gitleaks JSON output.
 type Finding struct {
@@ -121,18 +123,21 @@ func (s *Scanner) Scan(ctx context.Context, targetPath string) ([]model.Finding,
 		return nil, fmt.Errorf("failed to resolve path: %w", err)
 	}
 
-	// Check if path exists and is a directory
-	info, err := os.Stat(absPath)
+	// Check if path exists and is a directory using safepath
+	sp, err := safepath.New(absPath)
 	if err != nil {
-		return nil, fmt.Errorf("path does not exist: %w", err)
+		return nil, fmt.Errorf("path does not exist or is not accessible: %w", err)
+	}
+	info, err := sp.Stat(".")
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat path: %w", err)
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("path must be a directory: %s", absPath)
 	}
 
-	// Use temp directory instead of targetPath for report file
-	tmpDir := os.TempDir()
-	reportFile := filepath.Join(tmpDir, fmt.Sprintf("gitleaks-report-%s.json", uuid.New().String()))
+	// Use temp directory for report file
+	reportFile := filepath.Join(DefaultTempDir, fmt.Sprintf("gitleaks-report-%s.json", uuid.New().String()))
 
 	args := []string{
 		"detect",
@@ -154,8 +159,8 @@ func (s *Scanner) Scan(ctx context.Context, targetPath string) ([]model.Finding,
 	}
 
 	// Check for context cancellation before execution
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("context canceled: %w", ctxErr)
 	}
 
 	result, err := s.executor.Execute(ctx, cmd)
@@ -172,9 +177,9 @@ func (s *Scanner) Scan(ctx context.Context, targetPath string) ([]model.Finding,
 	}
 
 	// Check for context cancellation before parsing
-	if err := ctx.Err(); err != nil {
+	if ctxErr := ctx.Err(); ctxErr != nil {
 		_ = s.cleanupReport(reportFile)
-		return nil, fmt.Errorf("context cancelled: %w", err)
+		return nil, fmt.Errorf("context canceled: %w", ctxErr)
 	}
 
 	findings, err := s.parseReport(ctx, reportFile)
@@ -216,8 +221,8 @@ func (s *Scanner) parseReport(ctx context.Context, reportPath string) ([]model.F
 	}
 
 	// Check for context cancellation
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("context canceled: %w", ctxErr)
 	}
 
 	if len(data) == 0 {
