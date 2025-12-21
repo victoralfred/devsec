@@ -31,6 +31,7 @@ and compliance reporting for CI/CD pipelines.`,
 	rootCmd.AddCommand(NewSBOMCmd())
 	rootCmd.AddCommand(NewSignCmd())
 	rootCmd.AddCommand(NewAttestationCmd())
+	rootCmd.AddCommand(NewMLCmd())
 
 	return rootCmd
 }

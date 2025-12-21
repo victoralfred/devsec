@@ -27,14 +27,14 @@ const (
 // AuditTrail tracks audit information for a scan operation.
 // Fields ordered for optimal memory alignment.
 type AuditTrail struct {
-	mu            sync.RWMutex
-	operations    []Operation
-	scannerInfo   map[string]ScannerInfo
-	contentHashes map[string]string
 	startTime     time.Time
 	endTime       time.Time
+	scannerInfo   map[string]ScannerInfo
+	contentHashes map[string]string
 	targetPath    string
 	hostInfo      HostInfo
+	operations    []Operation
+	mu            sync.RWMutex
 }
 
 // Operation represents a single operation in the audit trail.

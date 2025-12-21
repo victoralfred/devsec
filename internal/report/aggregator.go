@@ -25,9 +25,9 @@ const (
 // Aggregator combines findings from multiple scanners.
 // Fields ordered for optimal memory alignment.
 type Aggregator struct {
-	mu             sync.RWMutex
 	scannerResults map[string]ScannerResult
 	findings       []model.Finding
+	mu             sync.RWMutex
 	dedupeEnabled  bool
 }
 

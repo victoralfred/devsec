@@ -23,9 +23,9 @@ const MaxPolicySize = 1 * 1024 * 1024
 
 // Engine provides OPA policy evaluation.
 type Engine struct {
-	mu           sync.RWMutex
 	policies     map[string]*compiledPolicy
 	defaultQuery string
+	mu           sync.RWMutex
 }
 
 // compiledPolicy holds a compiled OPA policy.
