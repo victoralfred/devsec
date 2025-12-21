@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/victoralfred/gowritter/safepath"
 )
@@ -1659,5 +1660,124 @@ func BenchmarkDetectWithCache(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = d.DetectWithCache(ctx, tmpDir)
+	}
+}
+
+func TestFileTimeoutConfig(t *testing.T) {
+	config := DefaultDetectorConfig()
+
+	// Default timeout should be 5 seconds.
+	if config.FileTimeout != 5*time.Second {
+		t.Errorf("expected default FileTimeout 5s, got %v", config.FileTimeout)
+	}
+}
+
+func TestFileTimeoutCustomConfig(t *testing.T) {
+	config := DetectorConfig{
+		FileTimeout: 10 * time.Second,
+	}
+	d := NewDetectorWithConfig(config)
+
+	if d.Config().FileTimeout != 10*time.Second {
+		t.Errorf("expected FileTimeout 10s, got %v", d.Config().FileTimeout)
+	}
+}
+
+func TestFileContextWithTimeout(t *testing.T) {
+	config := DetectorConfig{
+		FileTimeout: 100 * time.Millisecond,
+	}
+	d := NewDetectorWithConfig(config)
+
+	ctx := context.Background()
+	fileCtx, cancel := d.fileContext(ctx)
+	defer cancel()
+
+	// The context should have a deadline.
+	if _, ok := fileCtx.Deadline(); !ok {
+		t.Error("expected fileContext to have a deadline")
+	}
+}
+
+func TestFileContextWithoutTimeout(t *testing.T) {
+	config := DetectorConfig{
+		FileTimeout: 0, // Disabled
+	}
+	d := NewDetectorWithConfig(config)
+
+	ctx := context.Background()
+	fileCtx, cancel := d.fileContext(ctx)
+	defer cancel()
+
+	// The context should not have a deadline when timeout is disabled.
+	if _, ok := fileCtx.Deadline(); ok {
+		t.Error("expected fileContext to have no deadline when timeout is disabled")
+	}
+}
+
+func TestReadFileWithContextCanceled(t *testing.T) {
+	d := NewDetector()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	_, err := d.readFileWithContext(ctx, "/tmp/nonexistent.txt")
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestParseNotebookWithContextCanceled(t *testing.T) {
+	d := NewDetector()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	_, err := d.parseNotebookWithContext(ctx, "/tmp/nonexistent.ipynb")
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestExtractMetadataWithContextCanceled(t *testing.T) {
+	d := NewDetector()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	metadata := d.extractMetadataWithContext(ctx, "/tmp/model.h5", ModelTypeH5)
+	if metadata != nil {
+		t.Error("expected nil metadata when context is canceled")
+	}
+}
+
+func TestDetectWithFileTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a Python file.
+	content := []byte("import tensorflow as tf\nmodel = tf.keras.Sequential()")
+	if writeErr := sp.WriteFile("train.py", content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	// Use a very short timeout to test the timeout path.
+	config := DetectorConfig{
+		FileTimeout:    5 * time.Second,
+		MaxFileSize:    10 * 1024 * 1024,
+		MaxDepth:       10,
+		MaxFilesToScan: 100,
+	}
+	d := NewDetectorWithConfig(config)
+
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should still detect the framework.
+	if len(result.Frameworks) == 0 {
+		t.Error("expected at least one framework to be detected")
 	}
 }

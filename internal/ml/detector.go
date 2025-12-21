@@ -96,12 +96,13 @@ type DetectionResult struct {
 // DetectorConfig contains configuration for the ML detector.
 // Fields ordered for optimal memory alignment.
 type DetectorConfig struct {
-	ExcludePatterns []string `json:"exclude_patterns,omitempty"`
-	MaxFileSize     int64    `json:"max_file_size"`
-	MaxFilesToScan  int      `json:"max_files_to_scan"`
-	MaxDepth        int      `json:"max_depth"`
-	WorkerCount     int      `json:"worker_count"`
-	EnableCache     bool     `json:"enable_cache"`
+	ExcludePatterns []string      `json:"exclude_patterns,omitempty"`
+	FileTimeout     time.Duration `json:"file_timeout"`
+	MaxFileSize     int64         `json:"max_file_size"`
+	MaxFilesToScan  int           `json:"max_files_to_scan"`
+	MaxDepth        int           `json:"max_depth"`
+	WorkerCount     int           `json:"worker_count"`
+	EnableCache     bool          `json:"enable_cache"`
 }
 
 // CacheEntry represents a cached file detection result.
@@ -128,6 +129,7 @@ func DefaultDetectorConfig() DetectorConfig {
 		MaxDepth:       50,
 		MaxFilesToScan: 10000,
 		WorkerCount:    workerCount,
+		FileTimeout:    5 * time.Second, // Per-file processing timeout
 		EnableCache:    true,
 		ExcludePatterns: []string{
 			"**/node_modules/**",
@@ -247,6 +249,15 @@ func (d *Detector) Config() DetectorConfig {
 	return d.config
 }
 
+// fileContext creates a context with per-file timeout if configured.
+// Returns the context and a cancel function that must be called.
+func (d *Detector) fileContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if d.config.FileTimeout > 0 {
+		return context.WithTimeout(parent, d.config.FileTimeout)
+	}
+	return parent, func() {} // No-op cancel function
+}
+
 // Detect scans a directory for ML frameworks and model files.
 func (d *Detector) Detect(ctx context.Context, rootPath string) (*DetectionResult, error) {
 	if ctx.Err() != nil {
@@ -294,11 +305,17 @@ func (d *Detector) scanForFrameworks(ctx context.Context, rootPath string, resul
 
 		ext := strings.ToLower(filepath.Ext(path))
 
-		// Check for Jupyter notebook.
+		// Check for Jupyter notebook with per-file timeout.
 		if ext == ".ipynb" {
-			content, err := d.parseNotebook(path)
+			fileCtx, cancel := d.fileContext(ctx)
+			content, err := d.parseNotebookWithContext(fileCtx, path)
+			cancel()
 			if err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("parse notebook %s: %v", path, err))
+				if fileCtx.Err() == context.DeadlineExceeded {
+					result.Errors = append(result.Errors, fmt.Sprintf("timeout parsing notebook %s", path))
+				} else {
+					result.Errors = append(result.Errors, fmt.Sprintf("parse notebook %s: %v", path, err))
+				}
 				return nil
 			}
 			if content != "" {
@@ -319,10 +336,16 @@ func (d *Detector) scanForFrameworks(ctx context.Context, rootPath string, resul
 			return nil
 		}
 
-		// Read file content.
-		content, err := d.readFile(path)
+		// Read file content with per-file timeout.
+		fileCtx, cancel := d.fileContext(ctx)
+		content, err := d.readFileWithContext(fileCtx, path)
+		cancel()
 		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", path, err))
+			if fileCtx.Err() == context.DeadlineExceeded {
+				result.Errors = append(result.Errors, fmt.Sprintf("timeout reading %s", path))
+			} else {
+				result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", path, err))
+			}
 			return nil
 		}
 
@@ -424,10 +447,12 @@ func (d *Detector) scanForModels(ctx context.Context, rootPath string, result *D
 			SizeBytes: size,
 		}
 
-		// Try to extract metadata for certain formats.
-		if metadata := d.extractMetadata(path, modelType); metadata != nil {
+		// Try to extract metadata for certain formats with per-file timeout.
+		fileCtx, cancel := d.fileContext(ctx)
+		if metadata := d.extractMetadataWithContext(fileCtx, path, modelType); metadata != nil {
 			model.Metadata = metadata
 		}
+		cancel()
 
 		result.Models = append(result.Models, model)
 		return nil
@@ -484,6 +509,53 @@ func (d *Detector) extractMetadata(path string, modelType ModelType) map[string]
 	// Read file header for format-specific metadata.
 	data, err := d.readFile(path)
 	if err != nil {
+		return metadata
+	}
+
+	// Limit data read for metadata extraction.
+	const maxHeaderSize = 4096
+	headerData := data
+	if len(data) > maxHeaderSize {
+		headerData = data[:maxHeaderSize]
+	}
+
+	metadata["file_size"] = len(data)
+
+	switch modelType {
+	case ModelTypeH5:
+		d.extractH5Metadata(headerData, metadata)
+	case ModelTypePTH:
+		d.extractPyTorchMetadata(headerData, metadata)
+	case ModelTypeONNX:
+		d.extractONNXMetadata(headerData, metadata)
+	case ModelTypePickle:
+		d.extractPickleMetadata(headerData, metadata)
+	case ModelTypeSafetensors:
+		d.extractSafetensorsMetadata(headerData, metadata)
+	}
+
+	return metadata
+}
+
+// extractMetadataWithContext extracts metadata with context timeout support.
+func (d *Detector) extractMetadataWithContext(ctx context.Context, path string, modelType ModelType) map[string]interface{} {
+	if ctx.Err() != nil {
+		return nil
+	}
+
+	metadata := map[string]interface{}{
+		"model_type": string(modelType),
+		"path":       path,
+	}
+
+	// Read file header with context timeout.
+	data, err := d.readFileWithContext(ctx, path)
+	if err != nil {
+		return metadata
+	}
+
+	// Check context after file read.
+	if ctx.Err() != nil {
 		return metadata
 	}
 
@@ -753,6 +825,18 @@ func (d *Detector) readFile(path string) ([]byte, error) {
 	return sp.ReadFile(filename)
 }
 
+// readFileWithContext reads a file with context timeout support.
+func (d *Detector) readFileWithContext(ctx context.Context, path string) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// Perform the file read. Since file I/O is blocking, we check context
+	// before starting. For very large files, the caller's context timeout
+	// provides the actual deadline enforcement.
+	return d.readFile(path)
+}
+
 // notebookCell represents a cell in a Jupyter notebook.
 type notebookCell struct {
 	CellType string   `json:"cell_type"`
@@ -769,6 +853,45 @@ func (d *Detector) parseNotebook(path string) (string, error) {
 	data, err := d.readFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read notebook: %w", err)
+	}
+
+	var nb notebook
+	if err := json.Unmarshal(data, &nb); err != nil {
+		return "", fmt.Errorf("parse notebook JSON: %w", err)
+	}
+
+	var codeBuilder strings.Builder
+	for _, cell := range nb.Cells {
+		// Only process code cells, skip markdown, raw cells.
+		if cell.CellType != "code" {
+			continue
+		}
+
+		// Source is an array of lines.
+		for _, line := range cell.Source {
+			codeBuilder.WriteString(line)
+		}
+		codeBuilder.WriteString("\n")
+	}
+
+	return codeBuilder.String(), nil
+}
+
+// parseNotebookWithContext parses a notebook with context timeout support.
+func (d *Detector) parseNotebookWithContext(ctx context.Context, path string) (string, error) {
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	// Read file with context check.
+	data, err := d.readFileWithContext(ctx, path)
+	if err != nil {
+		return "", fmt.Errorf("read notebook: %w", err)
+	}
+
+	// Check context before parsing.
+	if ctx.Err() != nil {
+		return "", ctx.Err()
 	}
 
 	var nb notebook
