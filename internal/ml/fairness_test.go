@@ -417,3 +417,164 @@ func TestCalculateOverallRisk(t *testing.T) {
 		t.Errorf("expected 'medium' risk, got %q", report.RiskLevel)
 	}
 }
+
+// Benchmark tests for fairness checking and bias detection.
+
+func BenchmarkFairnessCheckSmall(b *testing.B) {
+	checker := NewFairnessChecker("group")
+
+	// Create small dataset: 100 samples, 2 groups.
+	predictions := make([]interface{}, 100)
+	labels := make([]interface{}, 100)
+	groups := make([]interface{}, 100)
+
+	for i := 0; i < 100; i++ {
+		predictions[i] = i % 2
+		labels[i] = i % 2
+		if i < 50 {
+			groups[i] = "A"
+		} else {
+			groups[i] = "B"
+		}
+	}
+
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = checker.CheckFairness(ctx, predictions, labels, groups)
+	}
+}
+
+func BenchmarkFairnessCheckMedium(b *testing.B) {
+	checker := NewFairnessChecker("group")
+
+	// Create medium dataset: 1000 samples, 5 groups.
+	predictions := make([]interface{}, 1000)
+	labels := make([]interface{}, 1000)
+	groups := make([]interface{}, 1000)
+
+	groupNames := []string{"A", "B", "C", "D", "E"}
+	for i := 0; i < 1000; i++ {
+		predictions[i] = i % 2
+		labels[i] = i % 2
+		idx := i % len(groupNames)
+		groups[i] = groupNames[idx] //nolint:gosec // Index is always in bounds due to modulo.
+	}
+
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = checker.CheckFairness(ctx, predictions, labels, groups)
+	}
+}
+
+func BenchmarkFairnessCheckLarge(b *testing.B) {
+	checker := NewFairnessChecker("group")
+
+	// Create large dataset: 10000 samples, 10 groups.
+	predictions := make([]interface{}, 10000)
+	labels := make([]interface{}, 10000)
+	groups := make([]interface{}, 10000)
+
+	groupNames := []string{"G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10"}
+	for i := 0; i < 10000; i++ {
+		predictions[i] = i % 2
+		labels[i] = i % 2
+		idx := i % len(groupNames)
+		groups[i] = groupNames[idx] //nolint:gosec // Index is always in bounds due to modulo.
+	}
+
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = checker.CheckFairness(ctx, predictions, labels, groups)
+	}
+}
+
+func BenchmarkBiasDetectionSmall(b *testing.B) {
+	detector := NewBiasDetector()
+
+	data := []map[string]interface{}{}
+	for i := 0; i < 100; i++ {
+		data = append(data, map[string]interface{}{
+			"feature": float64(i),
+			"label":   i % 2,
+		})
+	}
+
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = detector.DetectBias(ctx, data, []string{"feature"})
+	}
+}
+
+func BenchmarkBiasDetectionLarge(b *testing.B) {
+	detector := NewBiasDetector()
+
+	data := make([]map[string]interface{}, 10000)
+	for i := range data {
+		data[i] = map[string]interface{}{
+			"feature1": float64(i),
+			"feature2": float64(i % 100),
+			"feature3": float64(i * 2),
+			"label":    i % 2,
+		}
+	}
+
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = detector.DetectBias(ctx, data, []string{"feature1", "feature2", "feature3"})
+	}
+}
+
+// Fuzz tests for fairness and bias detection.
+
+func FuzzFairnessCheck(f *testing.F) {
+	// Add seed corpus.
+	f.Add(0, 0, "A")
+	f.Add(1, 1, "B")
+	f.Add(0, 1, "A")
+	f.Add(1, 0, "B")
+
+	checker := NewFairnessChecker("group")
+	ctx := context.Background()
+
+	f.Fuzz(func(t *testing.T, prediction, label int, group string) {
+		predictions := []interface{}{prediction}
+		labels := []interface{}{label}
+		groups := []interface{}{group}
+
+		// Should not panic.
+		_, _ = checker.CheckFairness(ctx, predictions, labels, groups)
+	})
+}
+
+func FuzzBiasDetection(f *testing.F) {
+	// Add seed corpus.
+	f.Add(1.0, 0)
+	f.Add(-1.0, 1)
+	f.Add(0.0, 0)
+	f.Add(100.0, 1)
+
+	detector := NewBiasDetector()
+	ctx := context.Background()
+
+	f.Fuzz(func(t *testing.T, featureVal float64, label int) {
+		data := []map[string]interface{}{
+			{
+				"feature": featureVal,
+				"label":   label,
+			},
+		}
+
+		// Should not panic.
+		_, _ = detector.DetectBias(ctx, data, []string{"feature"})
+	})
+}
