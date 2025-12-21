@@ -439,3 +439,417 @@ print("Hello, TensorFlow!")
 		t.Error("expected non-pipeline to not be detected as pipeline")
 	}
 }
+
+func TestDefaultDetectorConfig(t *testing.T) {
+	config := DefaultDetectorConfig()
+
+	if config.MaxFileSize != 10*1024*1024 {
+		t.Errorf("expected MaxFileSize 10MB, got %d", config.MaxFileSize)
+	}
+	if config.MaxDepth != 50 {
+		t.Errorf("expected MaxDepth 50, got %d", config.MaxDepth)
+	}
+	if config.MaxFilesToScan != 10000 {
+		t.Errorf("expected MaxFilesToScan 10000, got %d", config.MaxFilesToScan)
+	}
+	if len(config.ExcludePatterns) == 0 {
+		t.Error("expected exclude patterns to be set")
+	}
+}
+
+func TestNewDetectorWithConfig(t *testing.T) {
+	config := DetectorConfig{
+		MaxFileSize:    1024,
+		MaxDepth:       5,
+		MaxFilesToScan: 100,
+	}
+
+	d := NewDetectorWithConfig(config)
+	if d == nil {
+		t.Fatal("expected detector, got nil")
+	}
+
+	if d.config.MaxFileSize != 1024 {
+		t.Errorf("expected MaxFileSize 1024, got %d", d.config.MaxFileSize)
+	}
+	if d.config.MaxDepth != 5 {
+		t.Errorf("expected MaxDepth 5, got %d", d.config.MaxDepth)
+	}
+	if d.config.MaxFilesToScan != 100 {
+		t.Errorf("expected MaxFilesToScan 100, got %d", d.config.MaxFilesToScan)
+	}
+}
+
+func TestDetectorConfig(t *testing.T) {
+	config := DetectorConfig{
+		MaxFileSize: 2048,
+	}
+
+	d := NewDetectorWithConfig(config)
+	returnedConfig := d.Config()
+
+	if returnedConfig.MaxFileSize != 2048 {
+		t.Errorf("expected MaxFileSize 2048, got %d", returnedConfig.MaxFileSize)
+	}
+}
+
+func TestDetectorFileSizeLimit(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a small Python file.
+	smallContent := []byte("import tensorflow as tf")
+	if writeErr := sp.WriteFile("small.py", smallContent, 0o600); writeErr != nil {
+		t.Fatalf("write small file: %v", writeErr)
+	}
+
+	// Create a larger Python file that exceeds limit.
+	largeContent := make([]byte, 2000)
+	for i := range largeContent {
+		largeContent[i] = 'x'
+	}
+	if writeErr := sp.WriteFile("large.py", largeContent, 0o600); writeErr != nil {
+		t.Fatalf("write large file: %v", writeErr)
+	}
+
+	// Create detector with small file size limit.
+	config := DetectorConfig{
+		MaxFileSize:    1000, // 1KB limit
+		MaxDepth:       50,
+		MaxFilesToScan: 1000,
+	}
+	d := NewDetectorWithConfig(config)
+
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Large file should be skipped, so no frameworks detected from it.
+	// Only small.py should be scanned.
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+}
+
+func TestDetectorMaxFilesLimit(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create multiple Python files.
+	for i := 0; i < 10; i++ {
+		content := []byte("import tensorflow as tf")
+		filename := "file" + string(rune('0'+i)) + ".py"
+		if writeErr := sp.WriteFile(filename, content, 0o600); writeErr != nil {
+			t.Fatalf("write file: %v", writeErr)
+		}
+	}
+
+	// Create detector with low file limit.
+	config := DetectorConfig{
+		MaxFileSize:    10 * 1024 * 1024,
+		MaxDepth:       50,
+		MaxFilesToScan: 3, // Only scan 3 files
+	}
+	d := NewDetectorWithConfig(config)
+
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+
+	// Should have detected frameworks from limited files.
+	// The scan should have stopped after 3 files.
+}
+
+func TestDetectorMaxDepthLimit(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create nested directory structure.
+	if mkErr := sp.MkdirAll("level1/level2/level3", 0o755); mkErr != nil {
+		t.Fatalf("mkdir: %v", mkErr)
+	}
+
+	// Create Python file at root level.
+	if writeErr := sp.WriteFile("root.py", []byte("import tensorflow"), 0o600); writeErr != nil {
+		t.Fatalf("write root file: %v", writeErr)
+	}
+
+	// Create Python file at deep level.
+	deepSp, err := safepath.New(filepath.Join(tmpDir, "level1", "level2", "level3"))
+	if err != nil {
+		t.Fatalf("create deep safepath: %v", err)
+	}
+	if writeErr := deepSp.WriteFile("deep.py", []byte("import pytorch"), 0o600); writeErr != nil {
+		t.Fatalf("write deep file: %v", writeErr)
+	}
+
+	// Create detector with depth limit of 2 (will reach level1 but stop before level2).
+	config := DetectorConfig{
+		MaxFileSize:    10 * 1024 * 1024,
+		MaxDepth:       2,
+		MaxFilesToScan: 1000,
+	}
+	d := NewDetectorWithConfig(config)
+
+	// Scan should succeed and find root.py but not deep.py.
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+
+	// Should have found at least one framework (from root.py).
+	if len(result.Frameworks) == 0 {
+		t.Error("expected at least one framework from root.py")
+	}
+}
+
+func TestDetectJupyterNotebook(t *testing.T) {
+	ctx := context.Background()
+	d := NewDetector()
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a Jupyter notebook with TensorFlow code.
+	notebookContent := []byte(`{
+		"cells": [
+			{
+				"cell_type": "markdown",
+				"source": ["# ML Notebook"]
+			},
+			{
+				"cell_type": "code",
+				"source": ["import tensorflow as tf\n", "import numpy as np"]
+			},
+			{
+				"cell_type": "code",
+				"source": ["model = tf.keras.Sequential()\n", "model.compile(optimizer='adam')"]
+			}
+		]
+	}`)
+	if writeErr := sp.WriteFile("notebook.ipynb", notebookContent, 0o600); writeErr != nil {
+		t.Fatalf("write notebook: %v", writeErr)
+	}
+
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+
+	// Should detect TensorFlow from notebook.
+	found := false
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkTensorFlow {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected TensorFlow to be detected from Jupyter notebook")
+	}
+}
+
+func TestDetectJupyterNotebookPyTorch(t *testing.T) {
+	ctx := context.Background()
+	d := NewDetector()
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a Jupyter notebook with PyTorch code.
+	notebookContent := []byte(`{
+		"cells": [
+			{
+				"cell_type": "code",
+				"source": ["import torch\n", "import torch.nn as nn"]
+			},
+			{
+				"cell_type": "code",
+				"source": ["model = nn.Linear(10, 5)"]
+			}
+		]
+	}`)
+	if writeErr := sp.WriteFile("pytorch_notebook.ipynb", notebookContent, 0o600); writeErr != nil {
+		t.Fatalf("write notebook: %v", writeErr)
+	}
+
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	found := false
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkPyTorch {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected PyTorch to be detected from Jupyter notebook")
+	}
+}
+
+func TestDetectEmptyJupyterNotebook(t *testing.T) {
+	ctx := context.Background()
+	d := NewDetector()
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create an empty Jupyter notebook.
+	notebookContent := []byte(`{"cells": []}`)
+	if writeErr := sp.WriteFile("empty.ipynb", notebookContent, 0o600); writeErr != nil {
+		t.Fatalf("write notebook: %v", writeErr)
+	}
+
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+
+	// No frameworks should be detected.
+	if len(result.Frameworks) != 0 {
+		t.Errorf("expected no frameworks, got %d", len(result.Frameworks))
+	}
+}
+
+func TestDetectMalformedJupyterNotebook(t *testing.T) {
+	ctx := context.Background()
+	d := NewDetector()
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a malformed Jupyter notebook.
+	notebookContent := []byte(`{invalid json`)
+	if writeErr := sp.WriteFile("malformed.ipynb", notebookContent, 0o600); writeErr != nil {
+		t.Fatalf("write notebook: %v", writeErr)
+	}
+
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect should not fail: %v", err)
+	}
+
+	// Should have an error recorded.
+	if len(result.Errors) == 0 {
+		t.Error("expected error to be recorded for malformed notebook")
+	}
+}
+
+func TestParseNotebook(t *testing.T) {
+	d := NewDetector()
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a notebook with mixed cell types.
+	notebookContent := []byte(`{
+		"cells": [
+			{
+				"cell_type": "markdown",
+				"source": ["# Title"]
+			},
+			{
+				"cell_type": "code",
+				"source": ["print('hello')\n", "x = 1"]
+			},
+			{
+				"cell_type": "raw",
+				"source": ["raw content"]
+			},
+			{
+				"cell_type": "code",
+				"source": ["y = 2"]
+			}
+		]
+	}`)
+	if writeErr := sp.WriteFile("test.ipynb", notebookContent, 0o600); writeErr != nil {
+		t.Fatalf("write notebook: %v", writeErr)
+	}
+
+	content, err := d.parseNotebook(filepath.Join(tmpDir, "test.ipynb"))
+	if err != nil {
+		t.Fatalf("parseNotebook failed: %v", err)
+	}
+
+	// Should only contain code cells.
+	if content == "" {
+		t.Error("expected non-empty content")
+	}
+
+	// Should contain code from code cells.
+	if !contains(content, "print('hello')") {
+		t.Error("expected content to contain code from first code cell")
+	}
+	if !contains(content, "y = 2") {
+		t.Error("expected content to contain code from second code cell")
+	}
+
+	// Should not contain markdown or raw content.
+	if contains(content, "# Title") {
+		t.Error("content should not contain markdown cells")
+	}
+	if contains(content, "raw content") {
+		t.Error("content should not contain raw cells")
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || s != "" && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

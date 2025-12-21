@@ -539,22 +539,3 @@ func TestToFloat64(t *testing.T) {
 		}
 	}
 }
-
-func TestMathFunctions(t *testing.T) {
-	// Test abs.
-	if abs(-5.0) != 5.0 {
-		t.Error("abs(-5.0) should be 5.0")
-	}
-	if abs(5.0) != 5.0 {
-		t.Error("abs(5.0) should be 5.0")
-	}
-
-	// Test sqrt.
-	if sqrt(0) != 0 {
-		t.Error("sqrt(0) should be 0")
-	}
-	result := sqrt(4.0)
-	if result < 1.99 || result > 2.01 {
-		t.Errorf("sqrt(4.0) = %f, expected ~2.0", result)
-	}
-}

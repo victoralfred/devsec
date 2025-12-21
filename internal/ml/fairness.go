@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -154,11 +155,11 @@ func (c *SimpleFairnessChecker) CheckFairness(ctx context.Context, predictions, 
 	}
 
 	if len(predictions) != len(labels) || len(predictions) != len(groups) {
-		return nil, fmt.Errorf("predictions, labels, and groups must have same length")
+		return nil, ErrMismatchedLength
 	}
 
 	if len(predictions) == 0 {
-		return nil, fmt.Errorf("data cannot be empty")
+		return nil, ErrEmptyData
 	}
 
 	result := &FairnessResult{
@@ -299,7 +300,7 @@ func (c *SimpleFairnessChecker) calculateFairnessMetrics(result *FairnessResult)
 		})
 
 		// Statistical Parity (difference in positive rates).
-		sp := abs(gm.PositiveRate - refGroup.PositiveRate)
+		sp := math.Abs(gm.PositiveRate - refGroup.PositiveRate)
 		result.FairnessMetrics = append(result.FairnessMetrics, FairnessMetric{
 			Type:        MetricStatisticalParity,
 			Description: fmt.Sprintf("Difference in positive rates (%s vs %s)", gm.Name, refGroup.Name),
@@ -307,7 +308,7 @@ func (c *SimpleFairnessChecker) calculateFairnessMetrics(result *FairnessResult)
 		})
 
 		// Equal Opportunity (difference in TPR).
-		eo := abs(gm.TruePositiveRate - refGroup.TruePositiveRate)
+		eo := math.Abs(gm.TruePositiveRate - refGroup.TruePositiveRate)
 		result.FairnessMetrics = append(result.FairnessMetrics, FairnessMetric{
 			Type:        MetricEqualOpportunity,
 			Description: fmt.Sprintf("Difference in TPR (%s vs %s)", gm.Name, refGroup.Name),
@@ -404,11 +405,11 @@ func (d *SimpleBiasDetector) DetectBias(ctx context.Context, data interface{}, p
 
 	records, ok := data.([]map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("data must be []map[string]interface{}")
+		return nil, fmt.Errorf("%w: must be []map[string]interface{}", ErrInvalidDataType)
 	}
 
 	if len(records) == 0 {
-		return nil, fmt.Errorf("data cannot be empty")
+		return nil, ErrEmptyData
 	}
 
 	report := &BiasReport{

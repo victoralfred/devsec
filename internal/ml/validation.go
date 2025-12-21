@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -115,7 +116,7 @@ func (v *DataValidator) Validate(ctx context.Context, data interface{}) (*Valida
 	}
 
 	if v.schema == nil {
-		return nil, fmt.Errorf("schema is not set")
+		return nil, ErrNoSchema
 	}
 
 	start := time.Now()
@@ -133,7 +134,7 @@ func (v *DataValidator) Validate(ctx context.Context, data interface{}) (*Valida
 	case map[string]interface{}:
 		v.validateRecord(d, 0, result)
 	default:
-		return nil, fmt.Errorf("unsupported data type: %T", data)
+		return nil, fmt.Errorf("%w: %T", ErrInvalidDataType, data)
 	}
 
 	result.Statistics.Duration = time.Since(start)
@@ -398,16 +399,16 @@ func (d *SimpleDriftDetector) DetectDrift(ctx context.Context, baseline, current
 
 	baselineRecords, ok := baseline.([]map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("baseline must be []map[string]interface{}")
+		return nil, fmt.Errorf("%w: baseline must be []map[string]interface{}", ErrInvalidDataType)
 	}
 
 	currentRecords, ok := current.([]map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("current must be []map[string]interface{}")
+		return nil, fmt.Errorf("%w: current must be []map[string]interface{}", ErrInvalidDataType)
 	}
 
 	if len(baselineRecords) == 0 || len(currentRecords) == 0 {
-		return nil, fmt.Errorf("baseline and current data cannot be empty")
+		return nil, ErrEmptyData
 	}
 
 	result := &DriftResult{
@@ -436,9 +437,9 @@ func (d *SimpleDriftDetector) DetectDrift(ctx context.Context, baseline, current
 		// Calculate normalized difference.
 		var driftScore float64
 		if baselineStd > 0 {
-			driftScore = abs(currentMean-baselineMean) / baselineStd
+			driftScore = math.Abs(currentMean-baselineMean) / baselineStd
 		} else if baselineMean != 0 {
-			driftScore = abs(currentMean-baselineMean) / abs(baselineMean)
+			driftScore = math.Abs(currentMean-baselineMean) / math.Abs(baselineMean)
 		}
 
 		driftDetected := driftScore > d.threshold
@@ -522,31 +523,11 @@ func (d *SimpleDriftDetector) meanStd(values []float64) (mean, std float64) {
 	if len(values) > 1 {
 		variance := sumSq / float64(len(values)-1)
 		if variance > 0 {
-			std = sqrt(variance)
+			std = math.Sqrt(variance)
 		}
 	}
 
 	return mean, std
-}
-
-// abs returns absolute value.
-func abs(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
-// sqrt returns square root using Newton's method.
-func sqrt(x float64) float64 {
-	if x == 0 {
-		return 0
-	}
-	z := x / 2
-	for i := 0; i < 10; i++ {
-		z -= (z*z - x) / (2 * z)
-	}
-	return z
 }
 
 // ToJSON converts drift result to JSON.

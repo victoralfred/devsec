@@ -113,7 +113,7 @@ func (g *ModelCardGenerator) GenerateFromPath(ctx context.Context, projectPath s
 	}
 
 	if projectPath == "" {
-		return nil, fmt.Errorf("project path cannot be empty")
+		return nil, ErrEmptyPath
 	}
 
 	// Detect ML frameworks and models.
@@ -133,7 +133,7 @@ func (g *ModelCardGenerator) GenerateFromModel(ctx context.Context, modelPath st
 	}
 
 	if modelPath == "" {
-		return nil, fmt.Errorf("model path cannot be empty")
+		return nil, ErrEmptyPath
 	}
 
 	modelName := filepath.Base(modelPath)
@@ -448,7 +448,7 @@ func WriteModelCard(ctx context.Context, path string, card *ModelCard, format st
 	}
 
 	if card == nil {
-		return fmt.Errorf("model card cannot be nil")
+		return ErrNilModelCard
 	}
 
 	var content []byte
@@ -463,7 +463,7 @@ func WriteModelCard(ctx context.Context, path string, card *ModelCard, format st
 	case "markdown", "md":
 		content = []byte(card.ToMarkdown())
 	default:
-		return fmt.Errorf("unsupported format: %s (use 'json' or 'markdown')", format)
+		return fmt.Errorf("%w: %s (use 'json' or 'markdown')", ErrUnsupportedFormat, format)
 	}
 
 	dir := filepath.Dir(path)

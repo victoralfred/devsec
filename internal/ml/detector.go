@@ -89,15 +89,51 @@ type DetectionResult struct {
 	Errors     []string            `json:"errors,omitempty"`
 }
 
-// Detector detects ML frameworks and model files in a project.
-type Detector struct {
-	frameworkPatterns map[Framework]*regexp.Regexp
-	modelExtensions   map[string]ModelType
+// DetectorConfig contains configuration for the ML detector.
+// Fields ordered for optimal memory alignment.
+type DetectorConfig struct {
+	ExcludePatterns []string `json:"exclude_patterns,omitempty"`
+	MaxFileSize     int64    `json:"max_file_size"`
+	MaxFilesToScan  int      `json:"max_files_to_scan"`
+	MaxDepth        int      `json:"max_depth"`
 }
 
-// NewDetector creates a new ML detector.
+// DefaultDetectorConfig returns the default detector configuration.
+func DefaultDetectorConfig() DetectorConfig {
+	return DetectorConfig{
+		MaxFileSize:    10 * 1024 * 1024, // 10 MB
+		MaxDepth:       50,
+		MaxFilesToScan: 10000,
+		ExcludePatterns: []string{
+			"**/node_modules/**",
+			"**/.git/**",
+			"**/venv/**",
+			"**/__pycache__/**",
+			"**/dist/**",
+			"**/build/**",
+		},
+	}
+}
+
+// Detector detects ML frameworks and model files in a project.
+type Detector struct {
+	frameworkPatterns  map[Framework]*regexp.Regexp
+	confidencePatterns map[Framework][]*regexp.Regexp
+	pipelineIndicators []*regexp.Regexp
+	modelExtensions    map[string]ModelType
+	config             DetectorConfig
+	filesScanned       int
+}
+
+// NewDetector creates a new ML detector with default configuration.
 func NewDetector() *Detector {
+	return NewDetectorWithConfig(DefaultDetectorConfig())
+}
+
+// NewDetectorWithConfig creates a new ML detector with custom configuration.
+func NewDetectorWithConfig(config DetectorConfig) *Detector {
 	return &Detector{
+		config: config,
 		frameworkPatterns: map[Framework]*regexp.Regexp{
 			FrameworkTensorFlow:  regexp.MustCompile(`(?:import\s+tensorflow|from\s+tensorflow|import\s+keras|from\s+keras)`),
 			FrameworkPyTorch:     regexp.MustCompile(`(?:import\s+torch|from\s+torch)`),
@@ -106,6 +142,62 @@ func NewDetector() *Detector {
 			FrameworkHuggingFace: regexp.MustCompile(`(?:import\s+transformers|from\s+transformers|from\s+huggingface)`),
 			FrameworkXGBoost:     regexp.MustCompile(`(?:import\s+xgboost|from\s+xgboost)`),
 			FrameworkLightGBM:    regexp.MustCompile(`(?:import\s+lightgbm|from\s+lightgbm)`),
+		},
+		// Pre-compiled confidence patterns for each framework.
+		confidencePatterns: map[Framework][]*regexp.Regexp{
+			FrameworkTensorFlow: {
+				regexp.MustCompile(`tf\.keras`),
+				regexp.MustCompile(`model\.fit`),
+				regexp.MustCompile(`model\.compile`),
+				regexp.MustCompile(`tf\.data`),
+				regexp.MustCompile(`tf\.function`),
+			},
+			FrameworkPyTorch: {
+				regexp.MustCompile(`torch\.nn`),
+				regexp.MustCompile(`torch\.optim`),
+				regexp.MustCompile(`DataLoader`),
+				regexp.MustCompile(`\.backward\(\)`),
+				regexp.MustCompile(`\.zero_grad\(\)`),
+			},
+			FrameworkScikit: {
+				regexp.MustCompile(`\.fit\(`),
+				regexp.MustCompile(`\.predict\(`),
+				regexp.MustCompile(`train_test_split`),
+				regexp.MustCompile(`cross_val_score`),
+				regexp.MustCompile(`Pipeline`),
+			},
+			FrameworkHuggingFace: {
+				regexp.MustCompile(`AutoModel`),
+				regexp.MustCompile(`AutoTokenizer`),
+				regexp.MustCompile(`Trainer`),
+				regexp.MustCompile(`TrainingArguments`),
+				regexp.MustCompile(`pipeline\(`),
+			},
+			FrameworkXGBoost: {
+				regexp.MustCompile(`XGBClassifier`),
+				regexp.MustCompile(`XGBRegressor`),
+				regexp.MustCompile(`xgb\.train`),
+				regexp.MustCompile(`DMatrix`),
+			},
+			FrameworkLightGBM: {
+				regexp.MustCompile(`LGBMClassifier`),
+				regexp.MustCompile(`LGBMRegressor`),
+				regexp.MustCompile(`lgb\.train`),
+				regexp.MustCompile(`Dataset`),
+			},
+		},
+		// Pre-compiled pipeline indicators.
+		pipelineIndicators: []*regexp.Regexp{
+			regexp.MustCompile(`\.fit\(`),
+			regexp.MustCompile(`\.train\(`),
+			regexp.MustCompile(`epochs?\s*=`),
+			regexp.MustCompile(`batch_size\s*=`),
+			regexp.MustCompile(`learning_rate\s*=`),
+			regexp.MustCompile(`optimizer`),
+			regexp.MustCompile(`loss\s*=`),
+			regexp.MustCompile(`model\.save`),
+			regexp.MustCompile(`torch\.save`),
+			regexp.MustCompile(`checkpoint`),
 		},
 		modelExtensions: map[string]ModelType{
 			".h5":          ModelTypeH5,
@@ -120,7 +212,13 @@ func NewDetector() *Detector {
 			".safetensors": ModelTypeSafetensors,
 			".ckpt":        ModelTypeCheckpoint,
 		},
+		filesScanned: 0,
 	}
+}
+
+// Config returns the detector configuration.
+func (d *Detector) Config() DetectorConfig {
+	return d.config
 }
 
 // Detect scans a directory for ML frameworks and model files.
@@ -130,8 +228,11 @@ func (d *Detector) Detect(ctx context.Context, rootPath string) (*DetectionResul
 	}
 
 	if rootPath == "" {
-		return nil, fmt.Errorf("root path cannot be empty")
+		return nil, ErrEmptyPath
 	}
+
+	// Reset file counter for each scan.
+	d.filesScanned = 0
 
 	result := &DetectionResult{
 		Frameworks: make([]DetectedFramework, 0),
@@ -166,6 +267,21 @@ func (d *Detector) scanForFrameworks(ctx context.Context, rootPath string, resul
 		}
 
 		ext := strings.ToLower(filepath.Ext(path))
+
+		// Check for Jupyter notebook.
+		if ext == ".ipynb" {
+			content, err := d.parseNotebook(path)
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("parse notebook %s: %v", path, err))
+				return nil
+			}
+			if content != "" {
+				d.detectFrameworksInContent(content, path, result)
+			}
+			return nil
+		}
+
+		// Check for Python files.
 		isPython := false
 		for _, pyExt := range pythonExts {
 			if ext == pyExt {
@@ -211,57 +327,15 @@ func (d *Detector) detectFrameworksInContent(content, filePath string, result *D
 }
 
 // calculateConfidence calculates detection confidence based on content analysis.
+// Uses pre-compiled regex patterns for performance.
 func (d *Detector) calculateConfidence(content string, framework Framework) float64 {
 	confidence := 0.5 // Base confidence for import detection.
 
-	// Additional patterns that increase confidence.
-	confidencePatterns := map[Framework][]string{
-		FrameworkTensorFlow: {
-			`tf\.keras`,
-			`model\.fit`,
-			`model\.compile`,
-			`tf\.data`,
-			`tf\.function`,
-		},
-		FrameworkPyTorch: {
-			`torch\.nn`,
-			`torch\.optim`,
-			`DataLoader`,
-			`\.backward\(\)`,
-			`\.zero_grad\(\)`,
-		},
-		FrameworkScikit: {
-			`\.fit\(`,
-			`\.predict\(`,
-			`train_test_split`,
-			`cross_val_score`,
-			`Pipeline`,
-		},
-		FrameworkHuggingFace: {
-			`AutoModel`,
-			`AutoTokenizer`,
-			`Trainer`,
-			`TrainingArguments`,
-			`pipeline\(`,
-		},
-		FrameworkXGBoost: {
-			`XGBClassifier`,
-			`XGBRegressor`,
-			`xgb\.train`,
-			`DMatrix`,
-		},
-		FrameworkLightGBM: {
-			`LGBMClassifier`,
-			`LGBMRegressor`,
-			`lgb\.train`,
-			`Dataset`,
-		},
-	}
-
-	patterns, ok := confidencePatterns[framework]
+	// Use pre-compiled patterns from detector.
+	patterns, ok := d.confidencePatterns[framework]
 	if ok {
 		for _, p := range patterns {
-			if regexp.MustCompile(p).MatchString(content) {
+			if p.MatchString(content) {
 				confidence += 0.1
 			}
 		}
@@ -276,23 +350,11 @@ func (d *Detector) calculateConfidence(content string, framework Framework) floa
 }
 
 // isMLPipeline checks if content appears to be an ML training pipeline.
+// Uses pre-compiled regex patterns for performance.
 func (d *Detector) isMLPipeline(content string) bool {
-	pipelineIndicators := []string{
-		`\.fit\(`,
-		`\.train\(`,
-		`epochs?\s*=`,
-		`batch_size\s*=`,
-		`learning_rate\s*=`,
-		`optimizer`,
-		`loss\s*=`,
-		`model\.save`,
-		`torch\.save`,
-		`checkpoint`,
-	}
-
 	matches := 0
-	for _, indicator := range pipelineIndicators {
-		if regexp.MustCompile(indicator).MatchString(content) {
+	for _, indicator := range d.pipelineIndicators {
+		if indicator.MatchString(content) {
 			matches++
 		}
 	}
@@ -403,13 +465,23 @@ func (d *Detector) walkDirectory(ctx context.Context, rootPath string, fn func(p
 		return fmt.Errorf("create safepath: %w", err)
 	}
 
-	return d.walkRecursive(ctx, sp, rootPath, "", fn)
+	return d.walkRecursive(ctx, sp, rootPath, "", 0, fn)
 }
 
-// walkRecursive recursively walks directories.
-func (d *Detector) walkRecursive(ctx context.Context, sp *safepath.SafePath, rootPath, relativePath string, fn func(path string, isDir bool, size int64) error) error {
+// walkRecursive recursively walks directories with depth tracking.
+func (d *Detector) walkRecursive(ctx context.Context, sp *safepath.SafePath, rootPath, relativePath string, depth int, fn func(path string, isDir bool, size int64) error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+
+	// Check depth limit - stop scanning this branch but don't fail.
+	if d.config.MaxDepth > 0 && depth > d.config.MaxDepth {
+		return nil
+	}
+
+	// Check file count limit - stop scanning but don't fail.
+	if d.config.MaxFilesToScan > 0 && d.filesScanned >= d.config.MaxFilesToScan {
+		return nil
 	}
 
 	dirToRead := "."
@@ -426,6 +498,11 @@ func (d *Detector) walkRecursive(ctx context.Context, sp *safepath.SafePath, roo
 	for _, entry := range entries {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+
+		// Check file count limit for each iteration - stop scanning but don't fail.
+		if d.config.MaxFilesToScan > 0 && d.filesScanned >= d.config.MaxFilesToScan {
+			return nil
 		}
 
 		name := entry.Name()
@@ -448,12 +525,23 @@ func (d *Detector) walkRecursive(ctx context.Context, sp *safepath.SafePath, roo
 			size = info.Size()
 		}
 
+		// Check file size limit for non-directories.
+		if !entry.IsDir() && d.config.MaxFileSize > 0 && size > d.config.MaxFileSize {
+			// Skip files that exceed size limit, but don't fail.
+			continue
+		}
+
+		// Increment file counter for non-directories.
+		if !entry.IsDir() {
+			d.filesScanned++
+		}
+
 		if err := fn(fullPath, entry.IsDir(), size); err != nil {
 			return err
 		}
 
 		if entry.IsDir() {
-			if err := d.walkRecursive(ctx, sp, rootPath, entryPath, fn); err != nil {
+			if err := d.walkRecursive(ctx, sp, rootPath, entryPath, depth+1, fn); err != nil {
 				return err
 			}
 		}
@@ -473,6 +561,46 @@ func (d *Detector) readFile(path string) ([]byte, error) {
 	}
 
 	return sp.ReadFile(filename)
+}
+
+// notebookCell represents a cell in a Jupyter notebook.
+type notebookCell struct {
+	CellType string   `json:"cell_type"`
+	Source   []string `json:"source"`
+}
+
+// notebook represents a Jupyter notebook structure.
+type notebook struct {
+	Cells []notebookCell `json:"cells"`
+}
+
+// parseNotebook parses a Jupyter notebook and extracts code from code cells.
+func (d *Detector) parseNotebook(path string) (string, error) {
+	data, err := d.readFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read notebook: %w", err)
+	}
+
+	var nb notebook
+	if err := json.Unmarshal(data, &nb); err != nil {
+		return "", fmt.Errorf("parse notebook JSON: %w", err)
+	}
+
+	var codeBuilder strings.Builder
+	for _, cell := range nb.Cells {
+		// Only process code cells, skip markdown, raw cells.
+		if cell.CellType != "code" {
+			continue
+		}
+
+		// Source is an array of lines.
+		for _, line := range cell.Source {
+			codeBuilder.WriteString(line)
+		}
+		codeBuilder.WriteString("\n")
+	}
+
+	return codeBuilder.String(), nil
 }
 
 // uniqueStrings returns unique strings from a slice.
