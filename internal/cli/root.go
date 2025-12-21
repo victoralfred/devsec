@@ -27,6 +27,7 @@ and compliance reporting for CI/CD pipelines.`,
 
 	rootCmd.AddCommand(NewScanCmd())
 	rootCmd.AddCommand(NewVersionCmd())
+	rootCmd.AddCommand(NewPolicyCmd())
 
 	return rootCmd
 }
