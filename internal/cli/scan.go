@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -144,8 +143,10 @@ func outputJSON(cmd *cobra.Command, findings []model.Finding) error {
 	if cmd != nil {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
 	} else {
-		// Fallback to stdout if command is nil
-		_, _ = fmt.Fprintln(os.Stdout, string(data))
+		// If command is nil, we cannot safely output without os package
+		// This should not happen in normal operation, but we handle it gracefully
+		// by returning an error rather than using os package
+		return fmt.Errorf("cannot output JSON: command is nil")
 	}
 	return nil
 }

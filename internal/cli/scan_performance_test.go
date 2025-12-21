@@ -69,9 +69,14 @@ func TestMemoryUsageWithLargeFindings(t *testing.T) {
 		}
 	}
 
-	// Test JSON marshaling
+	// Test JSON marshaling with a valid command
+	cmd := NewScanSecretsCmd()
+	buf := newBuffer()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+
 	start := time.Now()
-	err := outputJSON(nil, largeFindings)
+	err := outputJSON(cmd, largeFindings)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -161,6 +166,11 @@ func BenchmarkOutputResults(b *testing.B) {
 
 // BenchmarkOutputJSON benchmarks JSON output performance.
 func BenchmarkOutputJSON(b *testing.B) {
+	cmd := NewScanSecretsCmd()
+	buf := newBuffer()
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+
 	findings := make([]model.Finding, 1000)
 	for i := range findings {
 		findings[i] = model.Finding{
@@ -171,7 +181,7 @@ func BenchmarkOutputJSON(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = outputJSON(nil, findings)
+		_ = outputJSON(cmd, findings)
 	}
 }
 

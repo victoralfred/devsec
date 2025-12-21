@@ -1,8 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
-	"os"
+	"io"
 	"path/filepath"
 	"testing"
 	"time"
@@ -149,6 +150,7 @@ func TestContextCancellation(t *testing.T) {
 
 // TestOutputFileSecurity tests output file path security.
 func TestOutputFileSecurity(t *testing.T) {
+	tmpDir := t.TempDir()
 	tests := []struct {
 		name        string
 		outputPath  string
@@ -156,7 +158,7 @@ func TestOutputFileSecurity(t *testing.T) {
 	}{
 		{"valid path", "/tmp/test.json", false},
 		{"path traversal", "../../../etc/passwd", true},
-		{"absolute path in temp", filepath.Join(os.TempDir(), "test.json"), false},
+		{"absolute path in temp", filepath.Join(tmpDir, "test.json"), false},
 		{"path with special chars", "test\x00file.json", true},
 	}
 
@@ -199,12 +201,8 @@ func TestTimeoutHandling(t *testing.T) {
 	}
 }
 
-// newBuffer is a helper function to create a buffer.
-func newBuffer() *os.File {
-	r, w, _ := os.Pipe()
-	go func() {
-		_, _ = w.Write([]byte{})
-		_ = w.Close()
-	}()
-	return r
+// newBuffer is a helper function to create a buffer that implements io.Writer.
+// Returns an io.Writer that can be used with cobra.Command.SetOut/SetErr.
+func newBuffer() io.Writer {
+	return &bytes.Buffer{}
 }
