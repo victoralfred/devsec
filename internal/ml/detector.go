@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/victoralfred/gowritter/safepath"
 )
@@ -96,14 +98,24 @@ type DetectorConfig struct {
 	MaxFileSize     int64    `json:"max_file_size"`
 	MaxFilesToScan  int      `json:"max_files_to_scan"`
 	MaxDepth        int      `json:"max_depth"`
+	WorkerCount     int      `json:"worker_count"`
 }
 
 // DefaultDetectorConfig returns the default detector configuration.
 func DefaultDetectorConfig() DetectorConfig {
+	workerCount := runtime.NumCPU()
+	if workerCount < 2 {
+		workerCount = 2
+	}
+	if workerCount > 8 {
+		workerCount = 8
+	}
+
 	return DetectorConfig{
 		MaxFileSize:    10 * 1024 * 1024, // 10 MB
 		MaxDepth:       50,
 		MaxFilesToScan: 10000,
+		WorkerCount:    workerCount,
 		ExcludePatterns: []string{
 			"**/node_modules/**",
 			"**/.git/**",
@@ -450,12 +462,176 @@ func (d *Detector) inferFramework(modelType ModelType) Framework {
 
 // extractMetadata extracts metadata from model files.
 func (d *Detector) extractMetadata(path string, modelType ModelType) map[string]interface{} {
-	// For now, return basic file info.
-	// More sophisticated metadata extraction can be added later.
-	return map[string]interface{}{
+	metadata := map[string]interface{}{
 		"model_type": string(modelType),
 		"path":       path,
 	}
+
+	// Read file header for format-specific metadata.
+	data, err := d.readFile(path)
+	if err != nil {
+		return metadata
+	}
+
+	// Limit data read for metadata extraction.
+	const maxHeaderSize = 4096
+	headerData := data
+	if len(data) > maxHeaderSize {
+		headerData = data[:maxHeaderSize]
+	}
+
+	metadata["file_size"] = len(data)
+
+	switch modelType {
+	case ModelTypeH5:
+		d.extractH5Metadata(headerData, metadata)
+	case ModelTypePTH:
+		d.extractPyTorchMetadata(headerData, metadata)
+	case ModelTypeONNX:
+		d.extractONNXMetadata(headerData, metadata)
+	case ModelTypePickle:
+		d.extractPickleMetadata(headerData, metadata)
+	case ModelTypeSafetensors:
+		d.extractSafetensorsMetadata(headerData, metadata)
+	}
+
+	return metadata
+}
+
+// extractH5Metadata extracts metadata from HDF5/Keras model files.
+func (d *Detector) extractH5Metadata(data []byte, metadata map[string]interface{}) {
+	if len(data) < 8 {
+		return
+	}
+
+	// HDF5 magic bytes: 0x89 0x48 0x44 0x46 0x0d 0x0a 0x1a 0x0a
+	h5Magic := []byte{0x89, 0x48, 0x44, 0x46, 0x0d, 0x0a, 0x1a, 0x0a}
+	if len(data) >= 8 && bytesEqual(data[:8], h5Magic) {
+		metadata["format"] = "HDF5"
+		metadata["is_valid_hdf5"] = true
+	} else {
+		metadata["is_valid_hdf5"] = false
+	}
+}
+
+// extractPyTorchMetadata extracts metadata from PyTorch model files.
+func (d *Detector) extractPyTorchMetadata(data []byte, metadata map[string]interface{}) {
+	if len(data) < 2 {
+		return
+	}
+
+	// Check for ZIP archive (PyTorch >= 1.6 uses ZIP format).
+	if len(data) >= 4 && data[0] == 0x50 && data[1] == 0x4b && data[2] == 0x03 && data[3] == 0x04 {
+		metadata["format"] = "PyTorch ZIP archive"
+		metadata["pytorch_version"] = ">=1.6"
+	} else if len(data) >= 2 && data[0] == 0x80 {
+		// Pickle protocol marker.
+		protocol := int(data[1])
+		metadata["format"] = "PyTorch pickle"
+		metadata["pickle_protocol"] = protocol
+		if protocol >= 4 {
+			metadata["pytorch_version"] = ">=1.0"
+		}
+	}
+}
+
+// extractONNXMetadata extracts metadata from ONNX model files.
+func (d *Detector) extractONNXMetadata(data []byte, metadata map[string]interface{}) {
+	if len(data) < 10 {
+		return
+	}
+
+	// ONNX files are protobuf format.
+	// Check for protobuf wire type (field 1, type 2 = length-delimited for ir_version).
+	if data[0] == 0x08 {
+		metadata["format"] = "ONNX protobuf"
+		// Try to extract IR version (varint after field tag).
+		if len(data) > 1 {
+			irVersion := int(data[1])
+			if irVersion > 0 && irVersion < 20 {
+				metadata["ir_version"] = irVersion
+			}
+		}
+	}
+}
+
+// extractPickleMetadata extracts metadata from pickle files.
+func (d *Detector) extractPickleMetadata(data []byte, metadata map[string]interface{}) {
+	if len(data) < 2 {
+		return
+	}
+
+	// Check pickle protocol.
+	switch data[0] {
+	case 0x80:
+		protocol := int(data[1])
+		metadata["pickle_protocol"] = protocol
+		metadata["format"] = "Python pickle"
+	case '(', ']', '}':
+		// Protocol 0 (ASCII).
+		metadata["pickle_protocol"] = 0
+		metadata["format"] = "Python pickle (ASCII)"
+	}
+}
+
+// extractSafetensorsMetadata extracts metadata from safetensors files.
+func (d *Detector) extractSafetensorsMetadata(data []byte, metadata map[string]interface{}) {
+	if len(data) < 8 {
+		return
+	}
+
+	// Safetensors format: 8-byte header size (little-endian) followed by JSON header.
+	headerSize := uint64(data[0]) |
+		uint64(data[1])<<8 |
+		uint64(data[2])<<16 |
+		uint64(data[3])<<24 |
+		uint64(data[4])<<32 |
+		uint64(data[5])<<40 |
+		uint64(data[6])<<48 |
+		uint64(data[7])<<56
+
+	metadata["format"] = "safetensors"
+
+	// Validate header size is reasonable and fits in int.
+	dataLen := uint64(len(data))
+	const maxHeaderSize = 1 << 30 // 1GB max header, reasonable limit.
+	if headerSize > 0 && headerSize < maxHeaderSize && headerSize < dataLen-8 {
+		metadata["header_size"] = headerSize
+		// Try to parse JSON header for tensor count.
+		// Safe conversion since we validated headerSize < maxHeaderSize.
+		headerEnd := 8 + int(headerSize) //nolint:gosec // headerSize validated above.
+		if headerEnd <= len(data) {
+			headerJSON := string(data[8:headerEnd])
+			tensorCount := countOccurrences(headerJSON, "\"dtype\"")
+			if tensorCount > 0 {
+				metadata["tensor_count"] = tensorCount
+			}
+		}
+	}
+}
+
+// bytesEqual compares two byte slices for equality.
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// countOccurrences counts the number of times a substring appears in a string.
+func countOccurrences(s, substr string) int {
+	count := 0
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			count++
+		}
+	}
+	return count
 }
 
 // walkDirectory walks a directory tree using safepath.
@@ -708,4 +884,210 @@ func (r *DetectionResult) Summary() string {
 	}
 
 	return sb.String()
+}
+
+// fileTask represents a file to be processed by the worker pool.
+type fileTask struct {
+	path  string
+	isDir bool
+	size  int64
+}
+
+// concurrentResult holds thread-safe detection results.
+// Fields ordered for optimal memory alignment.
+type concurrentResult struct {
+	frameworks []DetectedFramework
+	models     []DetectedModel
+	errors     []string
+	mu         sync.Mutex
+}
+
+func (r *concurrentResult) addFramework(f DetectedFramework) {
+	r.mu.Lock()
+	r.frameworks = append(r.frameworks, f)
+	r.mu.Unlock()
+}
+
+func (r *concurrentResult) addModel(m DetectedModel) {
+	r.mu.Lock()
+	r.models = append(r.models, m)
+	r.mu.Unlock()
+}
+
+func (r *concurrentResult) addError(err string) {
+	r.mu.Lock()
+	r.errors = append(r.errors, err)
+	r.mu.Unlock()
+}
+
+// DetectConcurrent scans a directory for ML frameworks and model files using concurrent workers.
+func (d *Detector) DetectConcurrent(ctx context.Context, rootPath string) (*DetectionResult, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	if rootPath == "" {
+		return nil, ErrEmptyPath
+	}
+
+	// Reset file counter for each scan.
+	d.filesScanned = 0
+
+	// Collect all file tasks.
+	tasks := make([]fileTask, 0, 1000)
+	if err := d.collectFileTasks(ctx, rootPath, &tasks); err != nil {
+		return nil, fmt.Errorf("collect file tasks: %w", err)
+	}
+
+	// Process tasks concurrently.
+	result := &concurrentResult{
+		frameworks: make([]DetectedFramework, 0),
+		models:     make([]DetectedModel, 0),
+		errors:     make([]string, 0),
+	}
+
+	workerCount := d.config.WorkerCount
+	if workerCount <= 0 {
+		workerCount = 4
+	}
+
+	d.processTasksConcurrently(ctx, tasks, result, workerCount)
+
+	return &DetectionResult{
+		Frameworks: result.frameworks,
+		Models:     result.models,
+		Errors:     result.errors,
+	}, nil
+}
+
+// collectFileTasks collects all file tasks from the directory tree.
+func (d *Detector) collectFileTasks(ctx context.Context, rootPath string, tasks *[]fileTask) error {
+	return d.walkDirectory(ctx, rootPath, func(path string, isDir bool, size int64) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		*tasks = append(*tasks, fileTask{
+			path:  path,
+			isDir: isDir,
+			size:  size,
+		})
+		return nil
+	})
+}
+
+// processTasksConcurrently processes file tasks using a worker pool.
+func (d *Detector) processTasksConcurrently(ctx context.Context, tasks []fileTask, result *concurrentResult, workerCount int) {
+	taskChan := make(chan fileTask, len(tasks))
+	var wg sync.WaitGroup
+
+	// Start workers.
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.worker(ctx, taskChan, result)
+		}()
+	}
+
+	// Send tasks to workers.
+	for _, task := range tasks {
+		select {
+		case <-ctx.Done():
+			close(taskChan)
+			wg.Wait()
+			return
+		case taskChan <- task:
+		}
+	}
+	close(taskChan)
+
+	// Wait for all workers to complete.
+	wg.Wait()
+}
+
+// worker processes file tasks from the channel.
+func (d *Detector) worker(ctx context.Context, tasks <-chan fileTask, result *concurrentResult) {
+	pythonExts := map[string]bool{".py": true, ".pyx": true, ".pyw": true}
+
+	for task := range tasks {
+		if ctx.Err() != nil {
+			return
+		}
+
+		if task.isDir {
+			// Check for TensorFlow SavedModel directory.
+			if d.isSavedModelDir(task.path) {
+				result.addModel(DetectedModel{
+					Path:      task.path,
+					Name:      filepath.Base(task.path),
+					Type:      ModelTypeSavedModel,
+					Framework: FrameworkTensorFlow,
+					SizeBytes: task.size,
+				})
+			}
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(task.path))
+
+		// Check for Jupyter notebook.
+		if ext == ".ipynb" {
+			content, err := d.parseNotebook(task.path)
+			if err != nil {
+				result.addError(fmt.Sprintf("parse notebook %s: %v", task.path, err))
+				continue
+			}
+			if content != "" {
+				d.detectFrameworksInContentConcurrent(content, task.path, result)
+			}
+			continue
+		}
+
+		// Check for Python files.
+		if pythonExts[ext] {
+			content, err := d.readFile(task.path)
+			if err != nil {
+				result.addError(fmt.Sprintf("read %s: %v", task.path, err))
+				continue
+			}
+			d.detectFrameworksInContentConcurrent(string(content), task.path, result)
+			continue
+		}
+
+		// Check for model files.
+		modelType, isModel := d.modelExtensions[ext]
+		if isModel {
+			model := DetectedModel{
+				Path:      task.path,
+				Name:      filepath.Base(task.path),
+				Type:      modelType,
+				Framework: d.inferFramework(modelType),
+				SizeBytes: task.size,
+			}
+
+			if metadata := d.extractMetadata(task.path, modelType); metadata != nil {
+				model.Metadata = metadata
+			}
+
+			result.addModel(model)
+		}
+	}
+}
+
+// detectFrameworksInContentConcurrent detects ML frameworks and adds to concurrent result.
+func (d *Detector) detectFrameworksInContentConcurrent(content, filePath string, result *concurrentResult) {
+	for framework, pattern := range d.frameworkPatterns {
+		matches := pattern.FindAllString(content, -1)
+		if len(matches) > 0 {
+			detected := DetectedFramework{
+				Name:         framework,
+				SourceFile:   filePath,
+				Imports:      d.uniqueStrings(matches),
+				Confidence:   d.calculateConfidence(content, framework),
+				IsMLPipeline: d.isMLPipeline(content),
+			}
+			result.addFramework(detected)
+		}
+	}
 }
