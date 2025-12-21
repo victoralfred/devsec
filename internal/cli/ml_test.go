@@ -775,3 +775,247 @@ func formatMockValidationResult(result *validationResultForTest) string {
 	sb.WriteString("\n")
 	return sb.String()
 }
+
+func TestMLDetectCSVFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	content := []byte("import tensorflow as tf\nmodel = tf.keras.Sequential()")
+	if err := sp.WriteFile("train.py", content, 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	cmd := NewMLDetectCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{tmpDir, "--format", "csv"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	output := buf.String()
+	// CSV should have header row.
+	if !strings.Contains(output, "Type,Name,SourceFile,Confidence,IsMLPipeline") {
+		t.Errorf("expected CSV header in output, got: %s", output)
+	}
+}
+
+func TestMLDetectHTMLFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	content := []byte("import torch\nmodel = torch.nn.Linear(10, 5)")
+	if err := sp.WriteFile("model.py", content, 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	cmd := NewMLDetectCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{tmpDir, "--format", "html"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	output := buf.String()
+	// HTML should have DOCTYPE and html tags.
+	if !strings.Contains(output, "<!DOCTYPE html>") {
+		t.Errorf("expected HTML doctype in output, got: %s", output)
+	}
+	if !strings.Contains(output, "<html") {
+		t.Errorf("expected html tag in output, got: %s", output)
+	}
+}
+
+func TestMLDetectJUnitFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	content := []byte("import sklearn\nfrom sklearn.linear_model import LogisticRegression")
+	if err := sp.WriteFile("train.py", content, 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	cmd := NewMLDetectCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{tmpDir, "--format", "junit"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	output := buf.String()
+	// JUnit should have XML structure.
+	if !strings.Contains(output, "<?xml") {
+		t.Errorf("expected XML declaration in output, got: %s", output)
+	}
+	if !strings.Contains(output, "<testsuites>") {
+		t.Errorf("expected testsuites tag in output, got: %s", output)
+	}
+}
+
+func TestMLDetectSARIFFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	content := []byte("import tensorflow as tf\nmodel = tf.keras.Sequential()")
+	if err := sp.WriteFile("train.py", content, 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	cmd := NewMLDetectCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{tmpDir, "--format", "sarif"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	output := buf.String()
+	// SARIF should have version and schema.
+	if !strings.Contains(output, `"version"`) {
+		t.Errorf("expected version in SARIF output, got: %s", output)
+	}
+	if !strings.Contains(output, `"$schema"`) {
+		t.Errorf("expected $schema in SARIF output, got: %s", output)
+	}
+}
+
+func TestMLFairnessCSVFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	data := `[
+		{"prediction": true, "label": true, "group": "A"},
+		{"prediction": false, "label": false, "group": "A"},
+		{"prediction": true, "label": true, "group": "B"},
+		{"prediction": false, "label": true, "group": "B"}
+	]`
+	if err := sp.WriteFile("data.json", []byte(data), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	cmd := NewMLFairnessCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{filepath.Join(tmpDir, "data.json"), "--format", "csv"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "MetricType,Value,Threshold,Passed") {
+		t.Errorf("expected CSV header in output, got: %s", output)
+	}
+}
+
+func TestMLBiasHTMLFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	data := `[
+		{"gender": "M", "age": 25, "outcome": 1},
+		{"gender": "M", "age": 30, "outcome": 1},
+		{"gender": "M", "age": 35, "outcome": 1},
+		{"gender": "F", "age": 28, "outcome": 0}
+	]`
+	if err := sp.WriteFile("data.json", []byte(data), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	cmd := NewMLBiasCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{filepath.Join(tmpDir, "data.json"), "--attributes", "gender", "--format", "html"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "<!DOCTYPE html>") {
+		t.Errorf("expected HTML doctype in output, got: %s", output)
+	}
+}
+
+func TestMLValidateCSVFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	schema := `{
+		"name": "test-schema",
+		"columns": [
+			{"name": "age", "type": "integer", "required": true, "min": 0, "max": 150}
+		]
+	}`
+	if err := sp.WriteFile("schema.json", []byte(schema), 0o644); err != nil {
+		t.Fatalf("write schema file: %v", err)
+	}
+
+	// Data with a validation error.
+	data := `[
+		{"age": 25},
+		{"age": -5}
+	]`
+	if err := sp.WriteFile("data.json", []byte(data), 0o644); err != nil {
+		t.Fatalf("write data file: %v", err)
+	}
+
+	cmd := NewMLValidateCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{
+		filepath.Join(tmpDir, "data.json"),
+		"--schema", filepath.Join(tmpDir, "schema.json"),
+		"--format", "csv",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Row,Column,Message,Code") {
+		t.Errorf("expected CSV header in output, got: %s", output)
+	}
+}

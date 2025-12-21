@@ -93,7 +93,7 @@ Supported frameworks:
 	}
 
 	cmd.Flags().StringVarP(&mlDetectOutput, "output", "o", "", "output file (default: stdout)")
-	cmd.Flags().StringVarP(&mlDetectFormat, "format", "f", "text", "output format (text, json)")
+	cmd.Flags().StringVarP(&mlDetectFormat, "format", "f", "text", "output format (text, json, csv, html, junit, sarif)")
 	cmd.Flags().DurationVarP(&mlDetectTimeout, "timeout", "t", 2*time.Minute, "detection timeout")
 
 	return cmd
@@ -126,6 +126,34 @@ func runMLDetect(cmd *cobra.Command, args []string) error {
 		output, err = result.ToJSON()
 		if err != nil {
 			return fmt.Errorf("marshal JSON: %w", err)
+		}
+	case "csv":
+		exporter := ml.NewCSVExporter()
+		output, err = exporter.ExportDetectionResult(result)
+		if err != nil {
+			return fmt.Errorf("export CSV: %w", err)
+		}
+	case "html":
+		exporter := ml.NewHTMLExporter("ML Detection Report")
+		output, err = exporter.ExportDetectionResult(result)
+		if err != nil {
+			return fmt.Errorf("export HTML: %w", err)
+		}
+	case "junit":
+		exporter := ml.NewJUnitExporter("ML Detection")
+		output, err = exporter.ExportDetectionResult(result)
+		if err != nil {
+			return fmt.Errorf("export JUnit: %w", err)
+		}
+	case "sarif":
+		exporter := ml.DefaultSARIFExporter()
+		report, sarifErr := exporter.ExportDetectionResult(result)
+		if sarifErr != nil {
+			return fmt.Errorf("export SARIF: %w", sarifErr)
+		}
+		output, err = report.ToJSON()
+		if err != nil {
+			return fmt.Errorf("marshal SARIF: %w", err)
 		}
 	default:
 		output = []byte(result.Summary())
@@ -252,7 +280,7 @@ Schema format (JSON):
 
 	cmd.Flags().StringVarP(&mlValidateSchema, "schema", "s", "", "schema file (required)")
 	cmd.Flags().StringVarP(&mlValidateOutput, "output", "o", "", "output file (default: stdout)")
-	cmd.Flags().StringVarP(&mlValidateFormat, "format", "f", "text", "output format (text, json)")
+	cmd.Flags().StringVarP(&mlValidateFormat, "format", "f", "text", "output format (text, json, csv)")
 	cmd.Flags().DurationVarP(&mlValidateTimeout, "timeout", "t", 2*time.Minute, "validation timeout")
 
 	_ = cmd.MarkFlagRequired("schema")
@@ -329,6 +357,12 @@ func runMLValidate(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("marshal JSON: %w", err)
 		}
+	case "csv":
+		exporter := ml.NewCSVExporter()
+		output, err = exporter.ExportValidationResult(result)
+		if err != nil {
+			return fmt.Errorf("export CSV: %w", err)
+		}
 	default:
 		output = []byte(formatValidationResult(result))
 	}
@@ -379,6 +413,7 @@ Use cases:
 	cmd.Flags().StringVarP(&mlDriftOutput, "output", "o", "", "output file (default: stdout)")
 	cmd.Flags().StringVarP(&mlDriftFormat, "format", "f", "text", "output format (text, json)")
 	cmd.Flags().DurationVarP(&mlDriftTimeout, "timeout", "t", 2*time.Minute, "detection timeout")
+	// Note: Drift detection uses text/json only as DriftResult doesn't have additional exporters yet.
 
 	return cmd
 }
@@ -457,7 +492,7 @@ Data format (JSON array with predictions, labels, groups):
 
 	cmd.Flags().StringVarP(&mlFairnessProtected, "protected", "p", "group", "protected attribute column name")
 	cmd.Flags().StringVarP(&mlFairnessOutput, "output", "o", "", "output file (default: stdout)")
-	cmd.Flags().StringVarP(&mlFairnessFormat, "format", "f", "text", "output format (text, json)")
+	cmd.Flags().StringVarP(&mlFairnessFormat, "format", "f", "text", "output format (text, json, csv, html, junit, sarif)")
 	cmd.Flags().DurationVarP(&mlFairnessTimeout, "timeout", "t", 2*time.Minute, "analysis timeout")
 
 	return cmd
@@ -506,6 +541,34 @@ func runMLFairness(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("marshal JSON: %w", err)
 		}
+	case "csv":
+		exporter := ml.NewCSVExporter()
+		output, err = exporter.ExportFairnessResult(result)
+		if err != nil {
+			return fmt.Errorf("export CSV: %w", err)
+		}
+	case "html":
+		exporter := ml.NewHTMLExporter("Fairness Analysis Report")
+		output, err = exporter.ExportFairnessResult(result)
+		if err != nil {
+			return fmt.Errorf("export HTML: %w", err)
+		}
+	case "junit":
+		exporter := ml.NewJUnitExporter("Fairness Analysis")
+		output, err = exporter.ExportFairnessResult(result)
+		if err != nil {
+			return fmt.Errorf("export JUnit: %w", err)
+		}
+	case "sarif":
+		exporter := ml.DefaultSARIFExporter()
+		report, sarifErr := exporter.ExportFairnessResult(result)
+		if sarifErr != nil {
+			return fmt.Errorf("export SARIF: %w", sarifErr)
+		}
+		output, err = report.ToJSON()
+		if err != nil {
+			return fmt.Errorf("marshal SARIF: %w", err)
+		}
 	default:
 		output = []byte(result.Summary())
 	}
@@ -537,7 +600,7 @@ Data format (JSON array):
 
 	cmd.Flags().StringVarP(&mlBiasAttributes, "attributes", "a", "", "protected attributes (comma-separated, required)")
 	cmd.Flags().StringVarP(&mlBiasOutput, "output", "o", "", "output file (default: stdout)")
-	cmd.Flags().StringVarP(&mlBiasFormat, "format", "f", "text", "output format (text, json)")
+	cmd.Flags().StringVarP(&mlBiasFormat, "format", "f", "text", "output format (text, json, csv, html, junit, sarif)")
 	cmd.Flags().DurationVarP(&mlBiasTimeout, "timeout", "t", 2*time.Minute, "analysis timeout")
 
 	_ = cmd.MarkFlagRequired("attributes")
@@ -582,6 +645,34 @@ func runMLBias(cmd *cobra.Command, args []string) error {
 		output, err = result.ToJSON()
 		if err != nil {
 			return fmt.Errorf("marshal JSON: %w", err)
+		}
+	case "csv":
+		exporter := ml.NewCSVExporter()
+		output, err = exporter.ExportBiasReport(result)
+		if err != nil {
+			return fmt.Errorf("export CSV: %w", err)
+		}
+	case "html":
+		exporter := ml.NewHTMLExporter("Bias Detection Report")
+		output, err = exporter.ExportBiasReport(result)
+		if err != nil {
+			return fmt.Errorf("export HTML: %w", err)
+		}
+	case "junit":
+		exporter := ml.NewJUnitExporter("Bias Detection")
+		output, err = exporter.ExportBiasReport(result)
+		if err != nil {
+			return fmt.Errorf("export JUnit: %w", err)
+		}
+	case "sarif":
+		exporter := ml.DefaultSARIFExporter()
+		report, sarifErr := exporter.ExportBiasReport(result)
+		if sarifErr != nil {
+			return fmt.Errorf("export SARIF: %w", sarifErr)
+		}
+		output, err = report.ToJSON()
+		if err != nil {
+			return fmt.Errorf("marshal SARIF: %w", err)
 		}
 	default:
 		output = []byte(result.Summary())
