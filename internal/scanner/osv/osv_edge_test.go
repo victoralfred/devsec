@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestParseGoModContentEdgeCases tests edge cases in go.mod parsing
+// TestParseGoModContentEdgeCases tests edge cases in go.mod parsing.
 func TestParseGoModContentEdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -30,7 +30,7 @@ func TestParseGoModContentEdgeCases(t *testing.T) {
 	}
 }
 
-// TestParsePackageJSONContentEdgeCases tests edge cases in package.json parsing
+// TestParsePackageJSONContentEdgeCases tests edge cases in package.json parsing.
 func TestParsePackageJSONContentEdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -55,7 +55,7 @@ func TestParsePackageJSONContentEdgeCases(t *testing.T) {
 	}
 }
 
-// TestParseRequirementsTxtContentEdgeCases tests edge cases in requirements.txt parsing
+// TestParseRequirementsTxtContentEdgeCases tests edge cases in requirements.txt parsing.
 func TestParseRequirementsTxtContentEdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -81,7 +81,7 @@ func TestParseRequirementsTxtContentEdgeCases(t *testing.T) {
 	}
 }
 
-// TestCleanVersionEdgeCases tests edge cases in version cleaning
+// TestCleanVersionEdgeCases tests edge cases in version cleaning.
 func TestCleanVersionEdgeCases(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -111,7 +111,7 @@ func TestCleanVersionEdgeCases(t *testing.T) {
 	}
 }
 
-// TestMapVulnerabilityEdgeCases tests edge cases in vulnerability mapping
+// TestMapVulnerabilityEdgeCases tests edge cases in vulnerability mapping.
 func TestMapVulnerabilityEdgeCases(t *testing.T) {
 	scanner := New()
 
@@ -136,11 +136,11 @@ func TestMapVulnerabilityEdgeCases(t *testing.T) {
 	}
 }
 
-// TestDetermineSeverityEdgeCases tests edge cases in severity determination
+// TestDetermineSeverityEdgeCases tests edge cases in severity determination.
 func TestDetermineSeverityEdgeCases(t *testing.T) {
 	scanner := New()
 
-	tests := []struct {
+	tests := []struct { //nolint:govet // test struct
 		name     string
 		vuln     *Vulnerability
 		expected bool // true if should have valid severity
@@ -163,11 +163,11 @@ func TestDetermineSeverityEdgeCases(t *testing.T) {
 	}
 }
 
-// TestBuildDescriptionEdgeCases tests edge cases in description building
+// TestBuildDescriptionEdgeCases tests edge cases in description building.
 func TestBuildDescriptionEdgeCases(t *testing.T) {
 	scanner := New()
 
-	tests := []struct {
+	tests := []struct { //nolint:govet // test struct
 		name string
 		vuln *Vulnerability
 		dep  *Dependency
@@ -192,7 +192,7 @@ func TestBuildDescriptionEdgeCases(t *testing.T) {
 	}
 }
 
-// TestFindFixedVersionEdgeCases tests edge cases in finding fixed version
+// TestFindFixedVersionEdgeCases tests edge cases in finding fixed version.
 func TestFindFixedVersionEdgeCases(t *testing.T) {
 	scanner := New()
 
@@ -242,7 +242,7 @@ func TestFindFixedVersionEdgeCases(t *testing.T) {
 	}
 }
 
-// TestScanFileInsteadOfDirectory tests scanning with file instead of directory
+// TestScanFileInsteadOfDirectory tests scanning with file instead of directory.
 func TestScanFileInsteadOfDirectory(t *testing.T) {
 	scanner := New()
 	ctx := context.Background()

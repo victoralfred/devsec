@@ -11,7 +11,7 @@ import (
 	"github.com/victoralfred/gowritter/safepath"
 )
 
-// TestPathTraversalSecurity tests for path traversal vulnerabilities
+// TestPathTraversalSecurity tests for path traversal vulnerabilities.
 func TestPathTraversalSecurity(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -55,7 +55,7 @@ func TestPathTraversalSecurity(t *testing.T) {
 	}
 }
 
-// TestFileSizeLimits tests file size limit enforcement
+// TestFileSizeLimits tests file size limit enforcement.
 func TestFileSizeLimits(t *testing.T) {
 	tmpDir := t.TempDir()
 	sp, err := safepath.New(tmpDir)
@@ -95,7 +95,7 @@ func TestFileSizeLimits(t *testing.T) {
 	}
 }
 
-// TestInputValidation tests input validation for security
+// TestInputValidation tests input validation for security.
 func TestInputValidation(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -131,7 +131,7 @@ func TestInputValidation(t *testing.T) {
 	}
 }
 
-// TestContextCancellation tests proper context cancellation handling
+// TestContextCancellation tests proper context cancellation handling.
 func TestContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -147,7 +147,7 @@ func TestContextCancellation(t *testing.T) {
 	}
 }
 
-// TestOutputFileSecurity tests output file path security
+// TestOutputFileSecurity tests output file path security.
 func TestOutputFileSecurity(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -180,7 +180,7 @@ func TestOutputFileSecurity(t *testing.T) {
 	}
 }
 
-// TestTimeoutHandling tests timeout behavior
+// TestTimeoutHandling tests timeout behavior.
 func TestTimeoutHandling(t *testing.T) {
 	// Test with very short timeout
 	shortTimeout := 1 * time.Nanosecond
@@ -199,7 +199,7 @@ func TestTimeoutHandling(t *testing.T) {
 	}
 }
 
-// Helper function to create a buffer
+// newBuffer is a helper function to create a buffer.
 func newBuffer() *os.File {
 	r, w, _ := os.Pipe()
 	go func() {

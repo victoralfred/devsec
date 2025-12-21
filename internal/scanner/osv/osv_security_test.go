@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// TestOSVScannerSecurity tests security aspects of OSV scanner
+// TestOSVScannerSecurity tests security aspects of OSV scanner.
 func TestOSVScannerSecurity(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -34,7 +34,7 @@ func TestOSVScannerSecurity(t *testing.T) {
 	}
 }
 
-// TestOSVAPISecurity tests API security
+// TestOSVAPISecurity tests API security.
 func TestOSVAPISecurity(t *testing.T) {
 	// Test with malicious server response
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +59,7 @@ func TestOSVAPISecurity(t *testing.T) {
 	}
 }
 
-// TestOSVInputValidation tests input validation
+// TestOSVInputValidation tests input validation.
 func TestOSVInputValidation(t *testing.T) {
 	scanner := New()
 	ctx := context.Background()
@@ -74,7 +74,7 @@ func TestOSVInputValidation(t *testing.T) {
 	}
 }
 
-// TestOSVContextCancellation tests context cancellation
+// TestOSVContextCancellation tests context cancellation.
 func TestOSVContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Delay response to test cancellation
@@ -97,7 +97,7 @@ func TestOSVContextCancellation(t *testing.T) {
 	}
 }
 
-// TestOSVTimeoutHandling tests timeout handling
+// TestOSVTimeoutHandling tests timeout handling.
 func TestOSVTimeoutHandling(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)

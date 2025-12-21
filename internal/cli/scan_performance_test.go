@@ -10,7 +10,7 @@ import (
 	"github.com/victoralfred/gowritter/safepath"
 )
 
-// TestLargeFindingsList tests performance with large findings lists
+// TestLargeFindingsList tests performance with large findings lists.
 func TestLargeFindingsList(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping performance test in short mode")
@@ -52,7 +52,7 @@ func TestLargeFindingsList(t *testing.T) {
 	}
 }
 
-// TestMemoryUsageWithLargeFindings tests memory usage with large findings
+// TestMemoryUsageWithLargeFindings tests memory usage with large findings.
 func TestMemoryUsageWithLargeFindings(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping memory test in short mode")
@@ -83,7 +83,7 @@ func TestMemoryUsageWithLargeFindings(t *testing.T) {
 	}
 }
 
-// TestLargeFileHandling tests handling of large files
+// TestLargeFileHandling tests handling of large files.
 func TestLargeFileHandling(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large file test in short mode")
@@ -124,7 +124,7 @@ func TestLargeFileHandling(t *testing.T) {
 	}
 }
 
-// TestTimeoutPerformance tests timeout handling performance
+// TestTimeoutPerformance tests timeout handling performance.
 func TestTimeoutPerformance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -138,7 +138,7 @@ func TestTimeoutPerformance(t *testing.T) {
 	}
 }
 
-// BenchmarkOutputResults benchmarks outputResults performance
+// BenchmarkOutputResults benchmarks outputResults performance.
 func BenchmarkOutputResults(b *testing.B) {
 	cmd := NewScanSecretsCmd()
 	buf := newBuffer()
@@ -159,7 +159,7 @@ func BenchmarkOutputResults(b *testing.B) {
 	}
 }
 
-// BenchmarkOutputJSON benchmarks JSON output performance
+// BenchmarkOutputJSON benchmarks JSON output performance.
 func BenchmarkOutputJSON(b *testing.B) {
 	findings := make([]model.Finding, 1000)
 	for i := range findings {
@@ -175,7 +175,7 @@ func BenchmarkOutputJSON(b *testing.B) {
 	}
 }
 
-// BenchmarkOutputText benchmarks text output performance
+// BenchmarkOutputText benchmarks text output performance.
 func BenchmarkOutputText(b *testing.B) {
 	cmd := NewScanSecretsCmd()
 	buf := newBuffer()

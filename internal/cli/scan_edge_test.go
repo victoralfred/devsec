@@ -153,7 +153,7 @@ func TestSpecialCharactersInPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Test that writeToFile handles special characters
+			// Test that writeToFile handles special characters.
 			data := []byte("test")
 			err := writeToFile(tt.path, data)
 			if (err != nil) != tt.expectError {
@@ -208,7 +208,7 @@ func TestFindingsWithMissingFields(t *testing.T) {
 	}
 }
 
-// TestVeryLongStrings tests handling of very long strings in findings
+// TestVeryLongStrings tests handling of very long strings in findings.
 func TestVeryLongStrings(t *testing.T) {
 	cmd := NewScanSecretsCmd()
 	buf := newBuffer()
@@ -235,7 +235,7 @@ func TestVeryLongStrings(t *testing.T) {
 	}
 }
 
-// TestMalformedFindingsJSON tests handling of malformed JSON structures
+// TestMalformedFindingsJSON tests handling of malformed JSON structures.
 func TestMalformedFindingsJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	sp, err := safepath.New(tmpDir)
@@ -259,7 +259,7 @@ func TestMalformedFindingsJSON(t *testing.T) {
 	_ = findings
 }
 
-// TestUnicodeInFindings tests handling of unicode characters in findings
+// TestUnicodeInFindings tests handling of unicode characters in findings.
 func TestUnicodeInFindings(t *testing.T) {
 	cmd := NewScanSecretsCmd()
 	buf := newBuffer()
@@ -283,13 +283,13 @@ func TestUnicodeInFindings(t *testing.T) {
 		t.Errorf("outputResults() error = %v", err)
 	}
 
-	// Test JSON encoding
+	// Test JSON encoding.
 	data, err := json.Marshal(findings)
 	if err != nil {
 		t.Errorf("json.Marshal() error = %v", err)
 	}
 
-	// Test JSON decoding
+	// Test JSON decoding.
 	var decoded []model.Finding
 	err = json.Unmarshal(data, &decoded)
 	if err != nil {
@@ -297,7 +297,7 @@ func TestUnicodeInFindings(t *testing.T) {
 	}
 }
 
-// TestNegativeLineNumbers tests handling of negative line numbers
+// TestNegativeLineNumbers tests handling of negative line numbers.
 func TestNegativeLineNumbers(t *testing.T) {
 	cmd := NewScanSecretsCmd()
 	buf := newBuffer()
