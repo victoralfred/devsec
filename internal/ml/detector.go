@@ -3,6 +3,8 @@ package ml
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -96,13 +98,14 @@ type DetectionResult struct {
 // DetectorConfig contains configuration for the ML detector.
 // Fields ordered for optimal memory alignment.
 type DetectorConfig struct {
-	ExcludePatterns []string      `json:"exclude_patterns,omitempty"`
-	FileTimeout     time.Duration `json:"file_timeout"`
-	MaxFileSize     int64         `json:"max_file_size"`
-	MaxFilesToScan  int           `json:"max_files_to_scan"`
-	MaxDepth        int           `json:"max_depth"`
-	WorkerCount     int           `json:"worker_count"`
-	EnableCache     bool          `json:"enable_cache"`
+	ExcludePatterns        []string      `json:"exclude_patterns,omitempty"`
+	FileTimeout            time.Duration `json:"file_timeout"`
+	MaxFileSize            int64         `json:"max_file_size"`
+	MaxFilesToScan         int           `json:"max_files_to_scan"`
+	MaxDepth               int           `json:"max_depth"`
+	WorkerCount            int           `json:"worker_count"`
+	EnableCache            bool          `json:"enable_cache"`
+	EnableHashVerification bool          `json:"enable_hash_verification"`
 }
 
 // CacheEntry represents a cached file detection result.
@@ -125,12 +128,13 @@ func DefaultDetectorConfig() DetectorConfig {
 	}
 
 	return DetectorConfig{
-		MaxFileSize:    10 * 1024 * 1024, // 10 MB
-		MaxDepth:       50,
-		MaxFilesToScan: 10000,
-		WorkerCount:    workerCount,
-		FileTimeout:    5 * time.Second, // Per-file processing timeout
-		EnableCache:    true,
+		MaxFileSize:            10 * 1024 * 1024, // 10 MB
+		MaxDepth:               50,
+		MaxFilesToScan:         10000,
+		WorkerCount:            workerCount,
+		FileTimeout:            5 * time.Second, // Per-file processing timeout
+		EnableCache:            true,
+		EnableHashVerification: true, // Calculate SHA256 hashes for model files
 		ExcludePatterns: []string{
 			"**/node_modules/**",
 			"**/.git/**",
@@ -499,6 +503,34 @@ func (d *Detector) inferFramework(modelType ModelType) Framework {
 	}
 }
 
+// calculateSHA256 calculates the SHA256 hash of data and returns it as a hex string.
+func calculateSHA256(data []byte) string {
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:])
+}
+
+// VerifyModelHash verifies that a model file matches an expected SHA256 hash.
+// Returns true if the hash matches, false otherwise.
+func (d *Detector) VerifyModelHash(path, expectedHash string) (bool, error) {
+	data, err := d.readFile(path)
+	if err != nil {
+		return false, fmt.Errorf("read file: %w", err)
+	}
+
+	actualHash := calculateSHA256(data)
+	return actualHash == expectedHash, nil
+}
+
+// GetModelHash calculates and returns the SHA256 hash of a model file.
+func (d *Detector) GetModelHash(path string) (string, error) {
+	data, err := d.readFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+
+	return calculateSHA256(data), nil
+}
+
 // extractMetadata extracts metadata from model files.
 func (d *Detector) extractMetadata(path string, modelType ModelType) map[string]interface{} {
 	metadata := map[string]interface{}{
@@ -520,6 +552,11 @@ func (d *Detector) extractMetadata(path string, modelType ModelType) map[string]
 	}
 
 	metadata["file_size"] = len(data)
+
+	// Calculate SHA256 hash if enabled.
+	if d.config.EnableHashVerification {
+		metadata["sha256"] = calculateSHA256(data)
+	}
 
 	switch modelType {
 	case ModelTypeH5:
@@ -567,6 +604,11 @@ func (d *Detector) extractMetadataWithContext(ctx context.Context, path string, 
 	}
 
 	metadata["file_size"] = len(data)
+
+	// Calculate SHA256 hash if enabled.
+	if d.config.EnableHashVerification {
+		metadata["sha256"] = calculateSHA256(data)
+	}
 
 	switch modelType {
 	case ModelTypeH5:

@@ -2,7 +2,9 @@ package ml
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/victoralfred/gowritter/safepath"
@@ -593,5 +595,241 @@ output = session.run(None, {input_name: input_data})
 	}
 	if !onnxModelDetected {
 		t.Error("expected ONNX model to be detected")
+	}
+}
+
+// Symlink tests - platform dependent (Unix-like systems).
+
+func TestSymlinkToFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a real Python file.
+	content := []byte("import tensorflow as tf\nmodel = tf.keras.Sequential()")
+	if writeErr := sp.WriteFile("real_train.py", content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	// Create a symlink to the file.
+	realPath := filepath.Join(tmpDir, "real_train.py")
+	linkPath := filepath.Join(tmpDir, "train.py")
+	if symlinkErr := os.Symlink(realPath, linkPath); symlinkErr != nil {
+		t.Fatalf("create symlink: %v", symlinkErr)
+	}
+
+	// Run detection.
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect TensorFlow from at least one file.
+	tfDetected := false
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkTensorFlow {
+			tfDetected = true
+		}
+	}
+	if !tfDetected {
+		t.Error("expected TensorFlow to be detected with symlinked file")
+	}
+}
+
+func TestSymlinkToDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a real directory with ML files.
+	if mkdirErr := sp.MkdirAll("real_models", 0o755); mkdirErr != nil {
+		t.Fatalf("mkdir: %v", mkdirErr)
+	}
+
+	content := []byte("import torch\nmodel = torch.nn.Linear(10, 5)")
+	if writeErr := sp.WriteFile(filepath.Join("real_models", "model.py"), content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	// Create a symlink to the directory.
+	realDir := filepath.Join(tmpDir, "real_models")
+	linkDir := filepath.Join(tmpDir, "models")
+	if symlinkErr := os.Symlink(realDir, linkDir); symlinkErr != nil {
+		t.Fatalf("create symlink: %v", symlinkErr)
+	}
+
+	// Run detection.
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect PyTorch.
+	pytorchDetected := false
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkPyTorch {
+			pytorchDetected = true
+		}
+	}
+	if !pytorchDetected {
+		t.Error("expected PyTorch to be detected through symlinked directory")
+	}
+}
+
+func TestBrokenSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	tmpDir := t.TempDir()
+
+	// Create a broken symlink (pointing to non-existent file).
+	linkPath := filepath.Join(tmpDir, "broken_link.py")
+	if symlinkErr := os.Symlink("/nonexistent/file.py", linkPath); symlinkErr != nil {
+		t.Fatalf("create symlink: %v", symlinkErr)
+	}
+
+	// Run detection - should not crash.
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should complete without panic.
+	if result == nil {
+		t.Error("expected non-nil result")
+	}
+}
+
+func TestCircularSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create directories.
+	if mkdirErr := sp.MkdirAll("dir_a", 0o755); mkdirErr != nil {
+		t.Fatalf("mkdir: %v", mkdirErr)
+	}
+	if mkdirErr := sp.MkdirAll("dir_b", 0o755); mkdirErr != nil {
+		t.Fatalf("mkdir: %v", mkdirErr)
+	}
+
+	// Create a Python file in dir_a.
+	content := []byte("import sklearn\nfrom sklearn.linear_model import LogisticRegression")
+	if writeErr := sp.WriteFile(filepath.Join("dir_a", "model.py"), content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	// Create circular symlinks: dir_a/link_to_b -> dir_b, dir_b/link_to_a -> dir_a
+	linkAtoB := filepath.Join(tmpDir, "dir_a", "link_to_b")
+	linkBtoA := filepath.Join(tmpDir, "dir_b", "link_to_a")
+
+	if symlinkErr := os.Symlink(filepath.Join(tmpDir, "dir_b"), linkAtoB); symlinkErr != nil {
+		t.Fatalf("create symlink A->B: %v", symlinkErr)
+	}
+	if symlinkErr := os.Symlink(filepath.Join(tmpDir, "dir_a"), linkBtoA); symlinkErr != nil {
+		t.Fatalf("create symlink B->A: %v", symlinkErr)
+	}
+
+	// Run detection with limited depth to prevent infinite loops.
+	config := DetectorConfig{
+		MaxDepth:       10,
+		MaxFileSize:    10 * 1024 * 1024,
+		MaxFilesToScan: 100,
+	}
+	d := NewDetectorWithConfig(config)
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should complete without infinite loop and detect scikit-learn.
+	sklearnDetected := false
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkScikit {
+			sklearnDetected = true
+		}
+	}
+	if !sklearnDetected {
+		t.Error("expected scikit-learn to be detected with circular symlinks")
+	}
+}
+
+func TestSymlinkToModelFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create directories.
+	if mkdirErr := sp.MkdirAll("real_models", 0o755); mkdirErr != nil {
+		t.Fatalf("mkdir: %v", mkdirErr)
+	}
+	if mkdirErr := sp.MkdirAll("linked_models", 0o755); mkdirErr != nil {
+		t.Fatalf("mkdir: %v", mkdirErr)
+	}
+
+	// Create a real model file.
+	h5Magic := []byte{0x89, 0x48, 0x44, 0x46, 0x0d, 0x0a, 0x1a, 0x0a}
+	modelData := make([]byte, 100)
+	copy(modelData, h5Magic)
+	if writeErr := sp.WriteFile(filepath.Join("real_models", "model.h5"), modelData, 0o600); writeErr != nil {
+		t.Fatalf("write model: %v", writeErr)
+	}
+
+	// Create a symlink to the model file.
+	realModel := filepath.Join(tmpDir, "real_models", "model.h5")
+	linkedModel := filepath.Join(tmpDir, "linked_models", "linked_model.h5")
+	if symlinkErr := os.Symlink(realModel, linkedModel); symlinkErr != nil {
+		t.Fatalf("create symlink: %v", symlinkErr)
+	}
+
+	// Run detection.
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect H5 models (could be 1 or 2 depending on symlink handling).
+	h5Count := 0
+	for _, model := range result.Models {
+		if model.Type == ModelTypeH5 {
+			h5Count++
+		}
+	}
+	if h5Count == 0 {
+		t.Error("expected at least one H5 model to be detected")
 	}
 }

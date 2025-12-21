@@ -2132,3 +2132,194 @@ func TestDetectMaxFilesReached(t *testing.T) {
 		t.Errorf("expected max 5 frameworks due to file limit, got %d", len(result.Frameworks))
 	}
 }
+
+func TestGetModelHash(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a test file with known content.
+	content := []byte("test model content for hashing")
+	if writeErr := sp.WriteFile("model.h5", content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	d := NewDetector()
+	modelPath := filepath.Join(tmpDir, "model.h5")
+
+	hash, err := d.GetModelHash(modelPath)
+	if err != nil {
+		t.Fatalf("GetModelHash failed: %v", err)
+	}
+
+	// Verify hash is a valid SHA256 hex string (64 characters).
+	if len(hash) != 64 {
+		t.Errorf("expected 64-character hash, got %d characters", len(hash))
+	}
+
+	// Verify hash is consistent.
+	hash2, err := d.GetModelHash(modelPath)
+	if err != nil {
+		t.Fatalf("GetModelHash (second call) failed: %v", err)
+	}
+	if hash != hash2 {
+		t.Errorf("hash should be consistent, got %s and %s", hash, hash2)
+	}
+}
+
+func TestVerifyModelHash(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a test file with known content.
+	content := []byte("test model content for verification")
+	if writeErr := sp.WriteFile("model.pth", content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	d := NewDetector()
+	modelPath := filepath.Join(tmpDir, "model.pth")
+
+	// Get the correct hash first.
+	correctHash, err := d.GetModelHash(modelPath)
+	if err != nil {
+		t.Fatalf("GetModelHash failed: %v", err)
+	}
+
+	// Test verification with correct hash.
+	match, err := d.VerifyModelHash(modelPath, correctHash)
+	if err != nil {
+		t.Fatalf("VerifyModelHash failed: %v", err)
+	}
+	if !match {
+		t.Error("VerifyModelHash should return true for correct hash")
+	}
+
+	// Test verification with incorrect hash.
+	wrongHash := "0000000000000000000000000000000000000000000000000000000000000000"
+	match, err = d.VerifyModelHash(modelPath, wrongHash)
+	if err != nil {
+		t.Fatalf("VerifyModelHash with wrong hash failed: %v", err)
+	}
+	if match {
+		t.Error("VerifyModelHash should return false for incorrect hash")
+	}
+}
+
+func TestVerifyModelHashNonexistentFile(t *testing.T) {
+	d := NewDetector()
+
+	_, err := d.VerifyModelHash("/nonexistent/path/model.h5", "somehash")
+	if err == nil {
+		t.Error("VerifyModelHash should fail for nonexistent file")
+	}
+}
+
+func TestGetModelHashNonexistentFile(t *testing.T) {
+	d := NewDetector()
+
+	_, err := d.GetModelHash("/nonexistent/path/model.h5")
+	if err == nil {
+		t.Error("GetModelHash should fail for nonexistent file")
+	}
+}
+
+func TestExtractMetadataIncludesHash(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a minimal H5 model file (just magic bytes for detection).
+	// H5 files start with: 0x89 'H' 'D' 'F' 0x0d 0x0a 0x1a 0x0a
+	h5Magic := []byte{0x89, 'H', 'D', 'F', 0x0d, 0x0a, 0x1a, 0x0a}
+	if writeErr := sp.WriteFile("model.h5", h5Magic, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	// Create detector with hash verification enabled (default).
+	config := DetectorConfig{
+		MaxFileSize:            10 * 1024 * 1024,
+		MaxDepth:               50,
+		MaxFilesToScan:         100,
+		EnableHashVerification: true,
+	}
+	d := NewDetectorWithConfig(config)
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect the H5 file.
+	if len(result.Models) == 0 {
+		t.Fatal("expected at least one model detected")
+	}
+
+	// Check that metadata includes sha256.
+	model := result.Models[0]
+	if model.Metadata == nil {
+		t.Fatal("expected metadata to be present")
+	}
+
+	sha256Hash, ok := model.Metadata["sha256"]
+	if !ok {
+		t.Error("expected sha256 hash in metadata")
+	}
+
+	// Verify hash is a valid SHA256 hex string (64 characters).
+	hashStr, ok := sha256Hash.(string)
+	if !ok {
+		t.Errorf("expected sha256 to be string, got %T", sha256Hash)
+	}
+	if len(hashStr) != 64 {
+		t.Errorf("expected 64-character hash, got %d characters", len(hashStr))
+	}
+}
+
+func TestExtractMetadataHashDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a minimal H5 model file.
+	h5Magic := []byte{0x89, 'H', 'D', 'F', 0x0d, 0x0a, 0x1a, 0x0a}
+	if writeErr := sp.WriteFile("model.h5", h5Magic, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	// Create detector with hash verification disabled.
+	config := DetectorConfig{
+		MaxFileSize:            10 * 1024 * 1024,
+		MaxDepth:               50,
+		MaxFilesToScan:         100,
+		EnableHashVerification: false,
+	}
+	d := NewDetectorWithConfig(config)
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect the H5 file.
+	if len(result.Models) == 0 {
+		t.Fatal("expected at least one model detected")
+	}
+
+	// Check that metadata does not include sha256.
+	model := result.Models[0]
+	if model.Metadata != nil {
+		if _, ok := model.Metadata["sha256"]; ok {
+			t.Error("sha256 hash should not be in metadata when disabled")
+		}
+	}
+}
