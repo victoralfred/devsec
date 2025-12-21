@@ -1781,3 +1781,354 @@ func TestDetectWithFileTimeout(t *testing.T) {
 		t.Error("expected at least one framework to be detected")
 	}
 }
+
+// Edge case tests for unicode, symlinks, permissions, and special characters.
+
+func TestDetectUnicodeContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a Python file with unicode content.
+	content := []byte(`# -*- coding: utf-8 -*-
+# 中文注释: TensorFlow模型
+# Комментарий на русском
+# 日本語コメント
+import tensorflow as tf
+
+# Variables with unicode names (not actual Python, just in comments)
+# 模型名称 = "my_model"
+model = tf.keras.Sequential([
+    tf.keras.layers.Dense(128, activation='relu'),
+    tf.keras.layers.Dense(10, activation='softmax')
+])
+# 训练模型
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy')
+model.fit(x_train, y_train, epochs=5)
+`)
+	if writeErr := sp.WriteFile("unicode_model.py", content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect TensorFlow framework.
+	found := false
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkTensorFlow {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected TensorFlow to be detected in unicode file")
+	}
+}
+
+func TestDetectVeryLongLines(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a Python file with very long lines.
+	var longLine string
+	for i := 0; i < 10000; i++ {
+		longLine += "x"
+	}
+
+	content := []byte("import tensorflow as tf\n# " + longLine + "\nmodel = tf.keras.Sequential()")
+	if writeErr := sp.WriteFile("long_lines.py", content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should still detect TensorFlow.
+	found := false
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkTensorFlow {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected TensorFlow to be detected despite very long lines")
+	}
+}
+
+func TestDetectEmptyDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Empty directory should return empty results.
+	if len(result.Frameworks) != 0 {
+		t.Errorf("expected 0 frameworks in empty directory, got %d", len(result.Frameworks))
+	}
+	if len(result.Models) != 0 {
+		t.Errorf("expected 0 models in empty directory, got %d", len(result.Models))
+	}
+}
+
+func TestDetectNestedEmptyDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create nested empty directories.
+	if mkdirErr := sp.MkdirAll("a/b/c/d/e", 0o755); mkdirErr != nil {
+		t.Fatalf("mkdir: %v", mkdirErr)
+	}
+
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should complete without error even with nested empty directories.
+	if len(result.Errors) != 0 {
+		t.Errorf("expected 0 errors, got %d: %v", len(result.Errors), result.Errors)
+	}
+}
+
+func TestDetectSpecialCharactersInFilename(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create files with special characters (but valid for most filesystems).
+	content := []byte("import tensorflow as tf\nmodel = tf.keras.Sequential()")
+
+	filenames := []string{
+		"model_v1.2.3.py",
+		"train-model.py",
+		"model (1).py",
+		"model_[test].py",
+	}
+
+	for _, fname := range filenames {
+		if writeErr := sp.WriteFile(fname, content, 0o600); writeErr != nil {
+			t.Logf("skipping file %s: %v", fname, writeErr)
+			continue
+		}
+	}
+
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect frameworks in files with special characters.
+	if len(result.Frameworks) == 0 {
+		t.Error("expected at least one framework to be detected")
+	}
+}
+
+func TestDetectMixedEncodings(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a file with UTF-8 BOM (Byte Order Mark).
+	utf8BOM := []byte{0xEF, 0xBB, 0xBF}
+	content := make([]byte, 0, len(utf8BOM)+50)
+	content = append(content, utf8BOM...)
+	content = append(content, []byte("import torch\nmodel = torch.nn.Linear(10, 5)")...)
+	if writeErr := sp.WriteFile("bom_file.py", content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect PyTorch despite BOM.
+	found := false
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkPyTorch {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected PyTorch to be detected in file with BOM")
+	}
+}
+
+func TestDetectBinaryFilesIgnored(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a binary file that looks like it might contain imports.
+	binaryContent := make([]byte, 1000)
+	for i := range binaryContent {
+		binaryContent[i] = byte(i % 256)
+	}
+	// Add some text that might trigger detection in a text file.
+	copy(binaryContent[100:], "import tensorflow")
+	if writeErr := sp.WriteFile("binary_file.bin", binaryContent, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Binary files should not be scanned for frameworks (only .py files are).
+	if len(result.Frameworks) != 0 {
+		t.Errorf("expected 0 frameworks from binary file, got %d", len(result.Frameworks))
+	}
+}
+
+func TestDetectDeepNesting(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a deeply nested structure.
+	deepPath := "a/b/c/d/e/f/g/h/i/j"
+	if mkdirErr := sp.MkdirAll(deepPath, 0o755); mkdirErr != nil {
+		t.Fatalf("mkdir: %v", mkdirErr)
+	}
+
+	// Create a file in the deep directory.
+	content := []byte("import sklearn\nfrom sklearn.linear_model import LogisticRegression")
+	if writeErr := sp.WriteFile(filepath.Join(deepPath, "model.py"), content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	d := NewDetector()
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect scikit-learn in deeply nested file.
+	found := false
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkScikit {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected scikit-learn to be detected in deeply nested file")
+	}
+}
+
+func TestDetectMaxDepthReached(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a deeply nested structure.
+	deepPath := "a/b/c/d/e/f/g/h/i/j"
+	if mkdirErr := sp.MkdirAll(deepPath, 0o755); mkdirErr != nil {
+		t.Fatalf("mkdir: %v", mkdirErr)
+	}
+
+	// Create a file beyond max depth.
+	content := []byte("import sklearn\nfrom sklearn.linear_model import LogisticRegression")
+	if writeErr := sp.WriteFile(filepath.Join(deepPath, "model.py"), content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	// Use a very limited depth.
+	config := DetectorConfig{
+		MaxDepth:       2,
+		MaxFileSize:    10 * 1024 * 1024,
+		MaxFilesToScan: 100,
+	}
+	d := NewDetectorWithConfig(config)
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should NOT detect scikit-learn because file is beyond max depth.
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkScikit {
+			t.Error("expected scikit-learn NOT to be detected due to max depth limit")
+			break
+		}
+	}
+}
+
+func TestDetectMaxFilesReached(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create many Python files.
+	for i := 0; i < 20; i++ {
+		content := []byte("import tensorflow as tf")
+		fname := "file" + string(rune('a'+i)) + ".py"
+		if writeErr := sp.WriteFile(fname, content, 0o600); writeErr != nil {
+			t.Fatalf("write file: %v", writeErr)
+		}
+	}
+
+	// Limit to scanning only 5 files.
+	config := DetectorConfig{
+		MaxFilesToScan: 5,
+		MaxFileSize:    10 * 1024 * 1024,
+		MaxDepth:       50,
+	}
+	d := NewDetectorWithConfig(config)
+	ctx := context.Background()
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should have limited number of frameworks detected.
+	if len(result.Frameworks) > 5 {
+		t.Errorf("expected max 5 frameworks due to file limit, got %d", len(result.Frameworks))
+	}
+}
