@@ -115,7 +115,7 @@ func TestCleanVersionEdgeCases(t *testing.T) {
 func TestMapVulnerabilityEdgeCases(t *testing.T) {
 	scanner := New()
 
-	tests := []struct {
+	tests := []struct { //nolint:govet // test struct
 		name string
 		vuln *Vulnerability
 		dep  *Dependency
