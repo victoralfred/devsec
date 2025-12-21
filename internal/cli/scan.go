@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/victoralfred/devsec/internal/model"
 	"github.com/victoralfred/devsec/internal/scanner/gitleaks"
+	"github.com/victoralfred/devsec/internal/scanner/osv"
 	"github.com/victoralfred/devsec/internal/scanner/semgrep"
 	"github.com/victoralfred/devsec/internal/scanner/trivy"
 	"github.com/victoralfred/gowritter/safepath"
@@ -40,6 +41,7 @@ func NewScanCmd() *cobra.Command {
 	scanCmd.AddCommand(NewScanSecretsCmd())
 	scanCmd.AddCommand(NewScanSastCmd())
 	scanCmd.AddCommand(NewScanVulnerabilitiesCmd())
+	scanCmd.AddCommand(NewScanDependenciesCmd())
 
 	return scanCmd
 }
@@ -385,6 +387,132 @@ func outputVulnerabilityText(cmd *cobra.Command, findings []model.Finding) error
 			f := &findings[i]
 			_, _ = fmt.Fprintf(&builder, "[%d] %s\n", i+1, f.Title)
 			_, _ = fmt.Fprintf(&builder, "    CVE:      %s\n", f.Rule)
+			_, _ = fmt.Fprintf(&builder, "    Severity: %s\n", f.Severity)
+			_, _ = fmt.Fprintf(&builder, "    File:     %s\n", f.Location.File)
+			if f.Description != "" {
+				_, _ = fmt.Fprintf(&builder, "    Details:  %s\n", f.Description)
+			}
+			_, _ = fmt.Fprintln(&builder)
+		}
+		return writeToFile(outputFile, []byte(builder.String()))
+	}
+
+	return nil
+}
+
+// NewScanDependenciesCmd creates the scan dependencies subcommand.
+func NewScanDependenciesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "dependencies [path]",
+		Short: "Scan for dependency vulnerabilities using OSV",
+		Long: `Scan the specified directory for dependency vulnerabilities
+using the OSV (Open Source Vulnerabilities) database.
+
+Supports: go.mod, package.json, requirements.txt
+
+If no path is specified, the current directory is scanned.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runScanDependencies,
+	}
+
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "output format (text, json)")
+	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "output file (default is stdout)")
+	cmd.Flags().DurationVarP(&timeout, "timeout", "t", 2*time.Minute, "scan timeout")
+
+	return cmd
+}
+
+func runScanDependencies(cmd *cobra.Command, args []string) error {
+	targetPath := "."
+	if len(args) > 0 {
+		targetPath = args[0]
+	}
+
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve path: %w", err)
+	}
+
+	scanner := osv.New(
+		osv.WithTimeout(timeout),
+	)
+
+	// Create context with timeout for cleanup.
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cleanupCancel()
+
+	defer func() {
+		closeErr := scanner.Close(cleanupCtx)
+		if closeErr != nil {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to close scanner: %v\n", closeErr)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if verbose {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Scanning %s for dependency vulnerabilities...\n", absPath)
+	}
+
+	findings, err := scanner.Scan(ctx, absPath)
+	if err != nil {
+		return fmt.Errorf("scan failed: %w", err)
+	}
+
+	if err := outputDependencyResults(cmd, findings); err != nil {
+		return fmt.Errorf("failed to output results: %w", err)
+	}
+
+	if len(findings) > 0 {
+		return ErrVulnerabilitiesFound
+	}
+
+	return nil
+}
+
+func outputDependencyResults(cmd *cobra.Command, findings []model.Finding) error {
+	switch outputFormat {
+	case "json":
+		return outputJSON(cmd, findings)
+	case "text":
+		return outputDependencyText(cmd, findings)
+	default:
+		return fmt.Errorf("unknown format: %s", outputFormat)
+	}
+}
+
+func outputDependencyText(cmd *cobra.Command, findings []model.Finding) error {
+	out := cmd.OutOrStdout()
+
+	if len(findings) == 0 {
+		_, _ = fmt.Fprintln(out, "No dependency vulnerabilities found.")
+		return nil
+	}
+
+	_, _ = fmt.Fprintf(out, "Found %d dependency vulnerability(ies):\n\n", len(findings))
+
+	for i := range findings {
+		f := &findings[i]
+		_, _ = fmt.Fprintf(out, "[%d] %s\n", i+1, f.Title)
+		_, _ = fmt.Fprintf(out, "    ID:       %s\n", f.Rule)
+		_, _ = fmt.Fprintf(out, "    Severity: %s\n", f.Severity)
+		_, _ = fmt.Fprintf(out, "    File:     %s\n", f.Location.File)
+		if f.Description != "" {
+			_, _ = fmt.Fprintf(out, "    Details:  %s\n", f.Description)
+		}
+		_, _ = fmt.Fprintln(out)
+	}
+
+	if outputFile != "" {
+		var builder strings.Builder
+		builder.Grow(len(findings) * 300)
+
+		_, _ = fmt.Fprintf(&builder, "Found %d dependency vulnerability(ies):\n\n", len(findings))
+		for i := range findings {
+			f := &findings[i]
+			_, _ = fmt.Fprintf(&builder, "[%d] %s\n", i+1, f.Title)
+			_, _ = fmt.Fprintf(&builder, "    ID:       %s\n", f.Rule)
 			_, _ = fmt.Fprintf(&builder, "    Severity: %s\n", f.Severity)
 			_, _ = fmt.Fprintf(&builder, "    File:     %s\n", f.Location.File)
 			if f.Description != "" {
