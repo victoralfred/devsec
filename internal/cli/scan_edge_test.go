@@ -163,7 +163,7 @@ func TestSpecialCharactersInPaths(t *testing.T) {
 	}
 }
 
-// TestInvalidOutputFormat tests handling of invalid output format
+// TestInvalidOutputFormat tests handling of invalid output format.
 func TestInvalidOutputFormat(t *testing.T) {
 	cmd := NewScanSecretsCmd()
 	buf := newBuffer()
@@ -180,7 +180,7 @@ func TestInvalidOutputFormat(t *testing.T) {
 	}
 }
 
-// TestFindingsWithMissingFields tests handling of findings with missing fields
+// TestFindingsWithMissingFields tests handling of findings with missing fields.
 func TestFindingsWithMissingFields(t *testing.T) {
 	cmd := NewScanSecretsCmd()
 	buf := newBuffer()
