@@ -842,6 +842,166 @@ func TestParseNotebook(t *testing.T) {
 	}
 }
 
+func TestParseNotebookWithCells(t *testing.T) {
+	d := NewDetector()
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a notebook with imports in different cells.
+	notebookContent := []byte(`{
+		"cells": [
+			{
+				"cell_type": "markdown",
+				"source": ["# ML Notebook"]
+			},
+			{
+				"cell_type": "code",
+				"source": ["import tensorflow as tf\n", "import keras"]
+			},
+			{
+				"cell_type": "code",
+				"source": ["model = tf.keras.Sequential()"]
+			},
+			{
+				"cell_type": "code",
+				"source": ["import torch\n", "import torch.nn as nn"]
+			}
+		]
+	}`)
+	if writeErr := sp.WriteFile("test.ipynb", notebookContent, 0o600); writeErr != nil {
+		t.Fatalf("write notebook: %v", writeErr)
+	}
+
+	result, err := d.parseNotebookWithCells(filepath.Join(tmpDir, "test.ipynb"))
+	if err != nil {
+		t.Fatalf("parseNotebookWithCells failed: %v", err)
+	}
+
+	// Should have 3 code cells.
+	if result.CellCount != 3 {
+		t.Errorf("expected 3 code cells, got %d", result.CellCount)
+	}
+
+	// Should have tracked imports with cell locations.
+	if len(result.CellImports) == 0 {
+		t.Fatal("expected cell imports to be tracked")
+	}
+
+	// Check that imports are in correct cells.
+	foundTFCell1 := false
+	foundPyTorchCell3 := false
+
+	for _, ci := range result.CellImports {
+		if ci.CellNumber == 1 && contains(ci.Import, "tensorflow") {
+			foundTFCell1 = true
+		}
+		if ci.CellNumber == 3 && contains(ci.Import, "torch") {
+			foundPyTorchCell3 = true
+		}
+	}
+
+	if !foundTFCell1 {
+		t.Error("expected tensorflow import in cell 1")
+	}
+	if !foundPyTorchCell3 {
+		t.Error("expected pytorch import in cell 3")
+	}
+}
+
+func TestDetectNotebookCellTracking(t *testing.T) {
+	ctx := context.Background()
+	d := NewDetector()
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a notebook with TensorFlow in cell 1 and PyTorch in cell 2.
+	notebookContent := []byte(`{
+		"cells": [
+			{
+				"cell_type": "code",
+				"source": ["import tensorflow as tf\n", "model = tf.keras.Sequential()"]
+			},
+			{
+				"cell_type": "code",
+				"source": ["import torch\n", "x = torch.tensor([1, 2, 3])"]
+			}
+		]
+	}`)
+	if writeErr := sp.WriteFile("multi_framework.ipynb", notebookContent, 0o600); writeErr != nil {
+		t.Fatalf("write notebook: %v", writeErr)
+	}
+
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect both frameworks with correct cell numbers.
+	if len(result.Frameworks) < 2 {
+		t.Fatalf("expected at least 2 frameworks, got %d", len(result.Frameworks))
+	}
+
+	foundTFCell1 := false
+	foundPyTorchCell2 := false
+
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkTensorFlow && fw.CellNumber == 1 {
+			foundTFCell1 = true
+		}
+		if fw.Name == FrameworkPyTorch && fw.CellNumber == 2 {
+			foundPyTorchCell2 = true
+		}
+	}
+
+	if !foundTFCell1 {
+		t.Error("expected TensorFlow to be detected in cell 1")
+	}
+	if !foundPyTorchCell2 {
+		t.Error("expected PyTorch to be detected in cell 2")
+	}
+}
+
+func TestDetectPythonFileNoCellNumber(t *testing.T) {
+	ctx := context.Background()
+	d := NewDetector()
+
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a regular Python file.
+	content := []byte("import tensorflow as tf\nmodel = tf.keras.Sequential()")
+	if writeErr := sp.WriteFile("train.py", content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	result, err := d.Detect(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Detect failed: %v", err)
+	}
+
+	// Should detect TensorFlow with CellNumber = 0 (not a notebook).
+	if len(result.Frameworks) == 0 {
+		t.Fatal("expected at least 1 framework")
+	}
+
+	for _, fw := range result.Frameworks {
+		if fw.Name == FrameworkTensorFlow && fw.CellNumber != 0 {
+			t.Errorf("expected CellNumber=0 for Python file, got %d", fw.CellNumber)
+		}
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || s != "" && containsHelper(s, substr))
 }

@@ -72,7 +72,15 @@ type DetectedFramework struct {
 	SourceFile   string    `json:"source_file"`
 	Imports      []string  `json:"imports,omitempty"`
 	Confidence   float64   `json:"confidence"`
+	CellNumber   int       `json:"cell_number,omitempty"` // 0 for non-notebook files, 1-indexed for notebooks
 	IsMLPipeline bool      `json:"is_ml_pipeline"`
+}
+
+// CellImport tracks an import statement with its cell location.
+type CellImport struct {
+	Import     string `json:"import"`
+	CellNumber int    `json:"cell_number"` // 1-indexed cell number
+	LineInCell int    `json:"line_in_cell"`
 }
 
 // DetectedModel contains information about a detected model file.
@@ -309,10 +317,10 @@ func (d *Detector) scanForFrameworks(ctx context.Context, rootPath string, resul
 
 		ext := strings.ToLower(filepath.Ext(path))
 
-		// Check for Jupyter notebook with per-file timeout.
+		// Check for Jupyter notebook with per-file timeout and cell tracking.
 		if ext == ".ipynb" {
 			fileCtx, cancel := d.fileContext(ctx)
-			content, err := d.parseNotebookWithContext(fileCtx, path)
+			nbResult, err := d.parseNotebookWithCellsContext(fileCtx, path)
 			cancel()
 			if err != nil {
 				if fileCtx.Err() == context.DeadlineExceeded {
@@ -322,8 +330,8 @@ func (d *Detector) scanForFrameworks(ctx context.Context, rootPath string, resul
 				}
 				return nil
 			}
-			if content != "" {
-				d.detectFrameworksInContent(content, path, result)
+			if nbResult != nil && nbResult.Code != "" {
+				d.detectFrameworksInNotebook(nbResult, path, result)
 			}
 			return nil
 		}
@@ -377,6 +385,58 @@ func (d *Detector) detectFrameworksInContent(content, filePath string, result *D
 			result.Frameworks = append(result.Frameworks, detected)
 		}
 	}
+}
+
+// detectFrameworksInNotebookResult detects frameworks with cell tracking and returns them.
+func (d *Detector) detectFrameworksInNotebookResult(nbResult *NotebookParseResult, filePath string) []DetectedFramework {
+	// Group imports by framework and cell.
+	//nolint:govet // Local struct with minimal allocations.
+	type cellFramework struct {
+		imports    []string
+		framework  Framework
+		cellNumber int
+	}
+
+	cellFrameworks := make(map[string]*cellFramework) // key: "framework:cell"
+
+	for _, ci := range nbResult.CellImports {
+		for framework, pattern := range d.frameworkPatterns {
+			if pattern.MatchString(ci.Import) {
+				key := fmt.Sprintf("%s:%d", framework, ci.CellNumber)
+				if cf, exists := cellFrameworks[key]; exists {
+					cf.imports = append(cf.imports, ci.Import)
+				} else {
+					cellFrameworks[key] = &cellFramework{
+						framework:  framework,
+						cellNumber: ci.CellNumber,
+						imports:    []string{ci.Import},
+					}
+				}
+			}
+		}
+	}
+
+	// Create DetectedFramework for each cell-framework combination.
+	result := make([]DetectedFramework, 0, len(cellFrameworks))
+	for _, cf := range cellFrameworks {
+		detected := DetectedFramework{
+			Name:         cf.framework,
+			SourceFile:   filePath,
+			Imports:      d.uniqueStrings(cf.imports),
+			CellNumber:   cf.cellNumber,
+			Confidence:   d.calculateConfidence(nbResult.Code, cf.framework),
+			IsMLPipeline: d.isMLPipeline(nbResult.Code),
+		}
+		result = append(result, detected)
+	}
+
+	return result
+}
+
+// detectFrameworksInNotebook detects frameworks with cell tracking for notebooks.
+func (d *Detector) detectFrameworksInNotebook(nbResult *NotebookParseResult, filePath string, result *DetectionResult) {
+	frameworks := d.detectFrameworksInNotebookResult(nbResult, filePath)
+	result.Frameworks = append(result.Frameworks, frameworks...)
 }
 
 // calculateConfidence calculates detection confidence based on content analysis.
@@ -890,6 +950,13 @@ type notebook struct {
 	Cells []notebookCell `json:"cells"`
 }
 
+// NotebookParseResult contains cell-aware parsing results.
+type NotebookParseResult struct {
+	Code        string       // Concatenated code from all cells
+	CellImports []CellImport // Imports with cell locations
+	CellCount   int          // Total number of code cells
+}
+
 // parseNotebook parses a Jupyter notebook and extracts code from code cells.
 func (d *Detector) parseNotebook(path string) (string, error) {
 	data, err := d.readFile(path)
@@ -956,6 +1023,114 @@ func (d *Detector) parseNotebookWithContext(ctx context.Context, path string) (s
 	}
 
 	return codeBuilder.String(), nil
+}
+
+// parseNotebookWithCells parses a notebook and tracks cell locations for imports.
+func (d *Detector) parseNotebookWithCells(path string) (*NotebookParseResult, error) {
+	data, err := d.readFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read notebook: %w", err)
+	}
+
+	var nb notebook
+	if err := json.Unmarshal(data, &nb); err != nil {
+		return nil, fmt.Errorf("parse notebook JSON: %w", err)
+	}
+
+	result := &NotebookParseResult{
+		CellImports: make([]CellImport, 0),
+	}
+
+	var codeBuilder strings.Builder
+	codeCellIndex := 0
+
+	for _, cell := range nb.Cells {
+		// Only process code cells, skip markdown, raw cells.
+		if cell.CellType != "code" {
+			continue
+		}
+
+		codeCellIndex++
+
+		// Process each line in the cell.
+		for lineNum, line := range cell.Source {
+			codeBuilder.WriteString(line)
+
+			// Check for import statements.
+			trimmedLine := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmedLine, "import ") || strings.HasPrefix(trimmedLine, "from ") {
+				result.CellImports = append(result.CellImports, CellImport{
+					Import:     trimmedLine,
+					CellNumber: codeCellIndex,
+					LineInCell: lineNum + 1, // 1-indexed
+				})
+			}
+		}
+		codeBuilder.WriteString("\n")
+	}
+
+	result.Code = codeBuilder.String()
+	result.CellCount = codeCellIndex
+
+	return result, nil
+}
+
+// parseNotebookWithCellsContext parses a notebook with context and tracks cell locations.
+func (d *Detector) parseNotebookWithCellsContext(ctx context.Context, path string) (*NotebookParseResult, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	data, err := d.readFileWithContext(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("read notebook: %w", err)
+	}
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	var nb notebook
+	if err := json.Unmarshal(data, &nb); err != nil {
+		return nil, fmt.Errorf("parse notebook JSON: %w", err)
+	}
+
+	result := &NotebookParseResult{
+		CellImports: make([]CellImport, 0),
+	}
+
+	var codeBuilder strings.Builder
+	codeCellIndex := 0
+
+	for _, cell := range nb.Cells {
+		// Only process code cells, skip markdown, raw cells.
+		if cell.CellType != "code" {
+			continue
+		}
+
+		codeCellIndex++
+
+		// Process each line in the cell.
+		for lineNum, line := range cell.Source {
+			codeBuilder.WriteString(line)
+
+			// Check for import statements.
+			trimmedLine := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmedLine, "import ") || strings.HasPrefix(trimmedLine, "from ") {
+				result.CellImports = append(result.CellImports, CellImport{
+					Import:     trimmedLine,
+					CellNumber: codeCellIndex,
+					LineInCell: lineNum + 1, // 1-indexed
+				})
+			}
+		}
+		codeBuilder.WriteString("\n")
+	}
+
+	result.Code = codeBuilder.String()
+	result.CellCount = codeCellIndex
+
+	return result, nil
 }
 
 // uniqueStrings returns unique strings from a slice.
@@ -1210,15 +1385,15 @@ func (d *Detector) worker(ctx context.Context, tasks <-chan fileTask, result *co
 
 		ext := strings.ToLower(filepath.Ext(task.path))
 
-		// Check for Jupyter notebook.
+		// Check for Jupyter notebook with cell tracking.
 		if ext == ".ipynb" {
-			content, err := d.parseNotebook(task.path)
+			nbResult, err := d.parseNotebookWithCells(task.path)
 			if err != nil {
 				result.addError(fmt.Sprintf("parse notebook %s: %v", task.path, err))
 				continue
 			}
-			if content != "" {
-				d.detectFrameworksInContentConcurrent(content, task.path, result)
+			if nbResult != nil && nbResult.Code != "" {
+				d.detectFrameworksInNotebookConcurrent(nbResult, task.path, result)
 			}
 			continue
 		}
@@ -1268,6 +1443,14 @@ func (d *Detector) detectFrameworksInContentConcurrent(content, filePath string,
 			}
 			result.addFramework(detected)
 		}
+	}
+}
+
+// detectFrameworksInNotebookConcurrent detects ML frameworks with cell tracking for concurrent result.
+func (d *Detector) detectFrameworksInNotebookConcurrent(nbResult *NotebookParseResult, filePath string, result *concurrentResult) {
+	frameworks := d.detectFrameworksInNotebookResult(nbResult, filePath)
+	for _, fw := range frameworks {
+		result.addFramework(fw)
 	}
 }
 
@@ -1391,34 +1574,38 @@ func (d *Detector) DetectWithCache(ctx context.Context, rootPath string) (*Detec
 				}
 			}
 
-			var content string
-			var readErr error
+			var detectedFrameworks []DetectedFramework
 
 			if ext == ".ipynb" {
-				content, readErr = d.parseNotebook(path)
+				// Use cell-aware parsing for notebooks.
+				nbResult, readErr := d.parseNotebookWithCells(path)
+				if readErr != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", path, readErr))
+					return nil
+				}
+
+				detectedFrameworks = d.detectFrameworksInNotebookResult(nbResult, path)
 			} else {
-				var data []byte
-				data, readErr = d.readFile(path)
-				content = string(data)
-			}
+				data, readErr := d.readFile(path)
+				if readErr != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", path, readErr))
+					return nil
+				}
+				content := string(data)
 
-			if readErr != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", path, readErr))
-				return nil
-			}
-
-			detectedFrameworks := make([]DetectedFramework, 0)
-			for framework, pattern := range d.frameworkPatterns {
-				matches := pattern.FindAllString(content, -1)
-				if len(matches) > 0 {
-					detected := DetectedFramework{
-						Name:         framework,
-						SourceFile:   path,
-						Imports:      d.uniqueStrings(matches),
-						Confidence:   d.calculateConfidence(content, framework),
-						IsMLPipeline: d.isMLPipeline(content),
+				detectedFrameworks = make([]DetectedFramework, 0)
+				for framework, pattern := range d.frameworkPatterns {
+					matches := pattern.FindAllString(content, -1)
+					if len(matches) > 0 {
+						detected := DetectedFramework{
+							Name:         framework,
+							SourceFile:   path,
+							Imports:      d.uniqueStrings(matches),
+							Confidence:   d.calculateConfidence(content, framework),
+							IsMLPipeline: d.isMLPipeline(content),
+						}
+						detectedFrameworks = append(detectedFrameworks, detected)
 					}
-					detectedFrameworks = append(detectedFrameworks, detected)
 				}
 			}
 
