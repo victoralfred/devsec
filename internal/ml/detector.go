@@ -2,14 +2,20 @@
 package ml
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/victoralfred/gowritter/safepath"
 )
@@ -68,7 +74,15 @@ type DetectedFramework struct {
 	SourceFile   string    `json:"source_file"`
 	Imports      []string  `json:"imports,omitempty"`
 	Confidence   float64   `json:"confidence"`
+	CellNumber   int       `json:"cell_number,omitempty"` // 0 for non-notebook files, 1-indexed for notebooks
 	IsMLPipeline bool      `json:"is_ml_pipeline"`
+}
+
+// CellImport tracks an import statement with its cell location.
+type CellImport struct {
+	Import     string `json:"import"`
+	CellNumber int    `json:"cell_number"` // 1-indexed cell number
+	LineInCell int    `json:"line_in_cell"`
 }
 
 // DetectedModel contains information about a detected model file.
@@ -94,11 +108,23 @@ type DetectionResult struct {
 // DetectorConfig contains configuration for the ML detector.
 // Fields ordered for optimal memory alignment.
 type DetectorConfig struct {
-	ExcludePatterns []string `json:"exclude_patterns,omitempty"`
-	MaxFileSize     int64    `json:"max_file_size"`
-	MaxFilesToScan  int      `json:"max_files_to_scan"`
-	MaxDepth        int      `json:"max_depth"`
-	WorkerCount     int      `json:"worker_count"`
+	ExcludePatterns        []string      `json:"exclude_patterns,omitempty"`
+	FileTimeout            time.Duration `json:"file_timeout"`
+	MaxFileSize            int64         `json:"max_file_size"`
+	MaxFilesToScan         int           `json:"max_files_to_scan"`
+	MaxDepth               int           `json:"max_depth"`
+	WorkerCount            int           `json:"worker_count"`
+	EnableCache            bool          `json:"enable_cache"`
+	EnableHashVerification bool          `json:"enable_hash_verification"`
+}
+
+// CacheEntry represents a cached file detection result.
+// Fields ordered for optimal memory alignment.
+type CacheEntry struct {
+	ModTime    time.Time           `json:"mod_time"`
+	Frameworks []DetectedFramework `json:"frameworks,omitempty"`
+	Models     []DetectedModel     `json:"models,omitempty"`
+	Size       int64               `json:"size"`
 }
 
 // DefaultDetectorConfig returns the default detector configuration.
@@ -112,10 +138,13 @@ func DefaultDetectorConfig() DetectorConfig {
 	}
 
 	return DetectorConfig{
-		MaxFileSize:    10 * 1024 * 1024, // 10 MB
-		MaxDepth:       50,
-		MaxFilesToScan: 10000,
-		WorkerCount:    workerCount,
+		MaxFileSize:            10 * 1024 * 1024, // 10 MB
+		MaxDepth:               50,
+		MaxFilesToScan:         10000,
+		WorkerCount:            workerCount,
+		FileTimeout:            5 * time.Second, // Per-file processing timeout
+		EnableCache:            true,
+		EnableHashVerification: true, // Calculate SHA256 hashes for model files
 		ExcludePatterns: []string{
 			"**/node_modules/**",
 			"**/.git/**",
@@ -129,6 +158,7 @@ func DefaultDetectorConfig() DetectorConfig {
 
 // Detector detects ML frameworks and model files in a project.
 type Detector struct {
+	cache              sync.Map // map[string]*CacheEntry
 	frameworkPatterns  map[Framework]*regexp.Regexp
 	confidencePatterns map[Framework][]*regexp.Regexp
 	pipelineIndicators []*regexp.Regexp
@@ -233,6 +263,15 @@ func (d *Detector) Config() DetectorConfig {
 	return d.config
 }
 
+// fileContext creates a context with per-file timeout if configured.
+// Returns the context and a cancel function that must be called.
+func (d *Detector) fileContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if d.config.FileTimeout > 0 {
+		return context.WithTimeout(parent, d.config.FileTimeout)
+	}
+	return parent, func() {} // No-op cancel function
+}
+
 // Detect scans a directory for ML frameworks and model files.
 func (d *Detector) Detect(ctx context.Context, rootPath string) (*DetectionResult, error) {
 	if ctx.Err() != nil {
@@ -280,15 +319,21 @@ func (d *Detector) scanForFrameworks(ctx context.Context, rootPath string, resul
 
 		ext := strings.ToLower(filepath.Ext(path))
 
-		// Check for Jupyter notebook.
+		// Check for Jupyter notebook with per-file timeout and cell tracking.
 		if ext == ".ipynb" {
-			content, err := d.parseNotebook(path)
+			fileCtx, cancel := d.fileContext(ctx)
+			nbResult, err := d.parseNotebookWithCellsContext(fileCtx, path)
+			cancel()
 			if err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("parse notebook %s: %v", path, err))
+				if fileCtx.Err() == context.DeadlineExceeded {
+					result.Errors = append(result.Errors, fmt.Sprintf("timeout parsing notebook %s", path))
+				} else {
+					result.Errors = append(result.Errors, fmt.Sprintf("parse notebook %s: %v", path, err))
+				}
 				return nil
 			}
-			if content != "" {
-				d.detectFrameworksInContent(content, path, result)
+			if nbResult != nil && nbResult.Code != "" {
+				d.detectFrameworksInNotebook(nbResult, path, result)
 			}
 			return nil
 		}
@@ -305,10 +350,16 @@ func (d *Detector) scanForFrameworks(ctx context.Context, rootPath string, resul
 			return nil
 		}
 
-		// Read file content.
-		content, err := d.readFile(path)
+		// Read file content with per-file timeout.
+		fileCtx, cancel := d.fileContext(ctx)
+		content, err := d.readFileWithContext(fileCtx, path)
+		cancel()
 		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", path, err))
+			if fileCtx.Err() == context.DeadlineExceeded {
+				result.Errors = append(result.Errors, fmt.Sprintf("timeout reading %s", path))
+			} else {
+				result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", path, err))
+			}
 			return nil
 		}
 
@@ -336,6 +387,58 @@ func (d *Detector) detectFrameworksInContent(content, filePath string, result *D
 			result.Frameworks = append(result.Frameworks, detected)
 		}
 	}
+}
+
+// detectFrameworksInNotebookResult detects frameworks with cell tracking and returns them.
+func (d *Detector) detectFrameworksInNotebookResult(nbResult *NotebookParseResult, filePath string) []DetectedFramework {
+	// Group imports by framework and cell.
+	//nolint:govet // Local struct with minimal allocations.
+	type cellFramework struct {
+		imports    []string
+		framework  Framework
+		cellNumber int
+	}
+
+	cellFrameworks := make(map[string]*cellFramework) // key: "framework:cell"
+
+	for _, ci := range nbResult.CellImports {
+		for framework, pattern := range d.frameworkPatterns {
+			if pattern.MatchString(ci.Import) {
+				key := fmt.Sprintf("%s:%d", framework, ci.CellNumber)
+				if cf, exists := cellFrameworks[key]; exists {
+					cf.imports = append(cf.imports, ci.Import)
+				} else {
+					cellFrameworks[key] = &cellFramework{
+						framework:  framework,
+						cellNumber: ci.CellNumber,
+						imports:    []string{ci.Import},
+					}
+				}
+			}
+		}
+	}
+
+	// Create DetectedFramework for each cell-framework combination.
+	result := make([]DetectedFramework, 0, len(cellFrameworks))
+	for _, cf := range cellFrameworks {
+		detected := DetectedFramework{
+			Name:         cf.framework,
+			SourceFile:   filePath,
+			Imports:      d.uniqueStrings(cf.imports),
+			CellNumber:   cf.cellNumber,
+			Confidence:   d.calculateConfidence(nbResult.Code, cf.framework),
+			IsMLPipeline: d.isMLPipeline(nbResult.Code),
+		}
+		result = append(result, detected)
+	}
+
+	return result
+}
+
+// detectFrameworksInNotebook detects frameworks with cell tracking for notebooks.
+func (d *Detector) detectFrameworksInNotebook(nbResult *NotebookParseResult, filePath string, result *DetectionResult) {
+	frameworks := d.detectFrameworksInNotebookResult(nbResult, filePath)
+	result.Frameworks = append(result.Frameworks, frameworks...)
 }
 
 // calculateConfidence calculates detection confidence based on content analysis.
@@ -410,10 +513,12 @@ func (d *Detector) scanForModels(ctx context.Context, rootPath string, result *D
 			SizeBytes: size,
 		}
 
-		// Try to extract metadata for certain formats.
-		if metadata := d.extractMetadata(path, modelType); metadata != nil {
+		// Try to extract metadata for certain formats with per-file timeout.
+		fileCtx, cancel := d.fileContext(ctx)
+		if metadata := d.extractMetadataWithContext(fileCtx, path, modelType); metadata != nil {
 			model.Metadata = metadata
 		}
+		cancel()
 
 		result.Models = append(result.Models, model)
 		return nil
@@ -460,6 +565,34 @@ func (d *Detector) inferFramework(modelType ModelType) Framework {
 	}
 }
 
+// calculateSHA256 calculates the SHA256 hash of data and returns it as a hex string.
+func calculateSHA256(data []byte) string {
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:])
+}
+
+// VerifyModelHash verifies that a model file matches an expected SHA256 hash.
+// Returns true if the hash matches, false otherwise.
+func (d *Detector) VerifyModelHash(path, expectedHash string) (bool, error) {
+	data, err := d.readFile(path)
+	if err != nil {
+		return false, fmt.Errorf("read file: %w", err)
+	}
+
+	actualHash := calculateSHA256(data)
+	return actualHash == expectedHash, nil
+}
+
+// GetModelHash calculates and returns the SHA256 hash of a model file.
+func (d *Detector) GetModelHash(path string) (string, error) {
+	data, err := d.readFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+
+	return calculateSHA256(data), nil
+}
+
 // extractMetadata extracts metadata from model files.
 func (d *Detector) extractMetadata(path string, modelType ModelType) map[string]interface{} {
 	metadata := map[string]interface{}{
@@ -481,6 +614,63 @@ func (d *Detector) extractMetadata(path string, modelType ModelType) map[string]
 	}
 
 	metadata["file_size"] = len(data)
+
+	// Calculate SHA256 hash if enabled.
+	if d.config.EnableHashVerification {
+		metadata["sha256"] = calculateSHA256(data)
+	}
+
+	switch modelType {
+	case ModelTypeH5:
+		d.extractH5Metadata(headerData, metadata)
+	case ModelTypePTH:
+		d.extractPyTorchMetadata(headerData, metadata)
+	case ModelTypeONNX:
+		d.extractONNXMetadata(headerData, metadata)
+	case ModelTypePickle:
+		d.extractPickleMetadata(headerData, metadata)
+	case ModelTypeSafetensors:
+		d.extractSafetensorsMetadata(headerData, metadata)
+	}
+
+	return metadata
+}
+
+// extractMetadataWithContext extracts metadata with context timeout support.
+func (d *Detector) extractMetadataWithContext(ctx context.Context, path string, modelType ModelType) map[string]interface{} {
+	if ctx.Err() != nil {
+		return nil
+	}
+
+	metadata := map[string]interface{}{
+		"model_type": string(modelType),
+		"path":       path,
+	}
+
+	// Read file header with context timeout.
+	data, err := d.readFileWithContext(ctx, path)
+	if err != nil {
+		return metadata
+	}
+
+	// Check context after file read.
+	if ctx.Err() != nil {
+		return metadata
+	}
+
+	// Limit data read for metadata extraction.
+	const maxHeaderSize = 4096
+	headerData := data
+	if len(data) > maxHeaderSize {
+		headerData = data[:maxHeaderSize]
+	}
+
+	metadata["file_size"] = len(data)
+
+	// Calculate SHA256 hash if enabled.
+	if d.config.EnableHashVerification {
+		metadata["sha256"] = calculateSHA256(data)
+	}
 
 	switch modelType {
 	case ModelTypeH5:
@@ -509,9 +699,116 @@ func (d *Detector) extractH5Metadata(data []byte, metadata map[string]interface{
 	if len(data) >= 8 && bytesEqual(data[:8], h5Magic) {
 		metadata["format"] = "HDF5"
 		metadata["is_valid_hdf5"] = true
+
+		// Parse HDF5 superblock for version info.
+		d.extractH5SuperblockInfo(data, metadata)
 	} else {
 		metadata["is_valid_hdf5"] = false
 	}
+}
+
+// extractH5SuperblockInfo extracts info from HDF5 superblock.
+func (d *Detector) extractH5SuperblockInfo(data []byte, metadata map[string]interface{}) {
+	if len(data) < 16 {
+		return
+	}
+
+	// After 8-byte signature, superblock starts.
+	// Byte 8: superblock version (0, 1, 2, or 3).
+	superblockVersion := int(data[8])
+	metadata["superblock_version"] = superblockVersion
+
+	// Parse based on superblock version.
+	switch superblockVersion {
+	case 0, 1:
+		// Version 0/1 superblock layout.
+		if len(data) >= 13 {
+			// Byte 9: Free-space storage version.
+			// Byte 10: Root group symbol table entry version.
+			// Byte 11: Reserved (zero).
+			// Byte 12: Shared header message format version.
+			metadata["free_space_version"] = int(data[9])
+			metadata["root_group_version"] = int(data[10])
+
+			if len(data) >= 14 {
+				// Byte 13: Size of offsets.
+				metadata["offset_size"] = int(data[13])
+			}
+			if len(data) >= 15 {
+				// Byte 14: Size of lengths.
+				metadata["length_size"] = int(data[14])
+			}
+		}
+
+	case 2, 3:
+		// Version 2/3 superblock layout (more compact).
+		if len(data) >= 10 {
+			// Byte 9: Size of offsets.
+			metadata["offset_size"] = int(data[9])
+		}
+		if len(data) >= 11 {
+			// Byte 10: Size of lengths.
+			metadata["length_size"] = int(data[10])
+		}
+	}
+
+	// Try to detect Keras model by looking for common attribute names.
+	d.detectKerasModelHints(data, metadata)
+}
+
+// detectKerasModelHints tries to identify Keras-specific content in HDF5.
+func (d *Detector) detectKerasModelHints(data []byte, metadata map[string]interface{}) {
+	// Search for common Keras strings in the file.
+	kerasHints := []string{
+		"keras_version",
+		"model_config",
+		"model_weights",
+		"optimizer_weights",
+		"training_config",
+		"backend",
+	}
+
+	foundHints := make([]string, 0)
+	dataStr := string(data)
+
+	for _, hint := range kerasHints {
+		if strings.Contains(dataStr, hint) {
+			foundHints = append(foundHints, hint)
+		}
+	}
+
+	if len(foundHints) > 0 {
+		metadata["keras_hints"] = foundHints
+		metadata["is_keras_model"] = true
+
+		// Try to extract keras version if present.
+		if idx := strings.Index(dataStr, "keras_version"); idx != -1 {
+			// Look for version string nearby (format varies).
+			searchArea := dataStr[idx:minInt(idx+100, len(dataStr))]
+			// Common version patterns.
+			for _, prefix := range []string{"2.", "3."} {
+				if vIdx := strings.Index(searchArea, prefix); vIdx != -1 {
+					// Extract version-like string.
+					end := vIdx + 1
+					for end < len(searchArea) && (searchArea[end] == '.' || (searchArea[end] >= '0' && searchArea[end] <= '9')) {
+						end++
+					}
+					if end > vIdx+2 {
+						metadata["keras_version_hint"] = searchArea[vIdx:end]
+						break
+					}
+				}
+			}
+		}
+	}
+}
+
+// minInt returns the minimum of two integers.
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // extractPyTorchMetadata extracts metadata from PyTorch model files.
@@ -524,6 +821,9 @@ func (d *Detector) extractPyTorchMetadata(data []byte, metadata map[string]inter
 	if len(data) >= 4 && data[0] == 0x50 && data[1] == 0x4b && data[2] == 0x03 && data[3] == 0x04 {
 		metadata["format"] = "PyTorch ZIP archive"
 		metadata["pytorch_version"] = ">=1.6"
+
+		// Parse ZIP to extract more details.
+		d.extractPyTorchZIPDetails(data, metadata)
 	} else if len(data) >= 2 && data[0] == 0x80 {
 		// Pickle protocol marker.
 		protocol := int(data[1])
@@ -535,6 +835,66 @@ func (d *Detector) extractPyTorchMetadata(data []byte, metadata map[string]inter
 	}
 }
 
+// extractPyTorchZIPDetails extracts detailed info from PyTorch ZIP archives.
+func (d *Detector) extractPyTorchZIPDetails(data []byte, metadata map[string]interface{}) {
+	reader := bytes.NewReader(data)
+	zipReader, err := zip.NewReader(reader, int64(len(data)))
+	if err != nil {
+		return
+	}
+
+	files := make([]string, 0, len(zipReader.File))
+	var hasDataPkl, hasVersion, hasModelPy, hasConstants bool
+	var tensorCount int
+
+	for _, f := range zipReader.File {
+		name := f.Name
+		files = append(files, name)
+
+		// Check for known PyTorch archive files.
+		baseName := filepath.Base(name)
+		switch {
+		case baseName == "data.pkl":
+			hasDataPkl = true
+		case baseName == "version":
+			hasVersion = true
+			// Try to read version.
+			if rc, openErr := f.Open(); openErr == nil {
+				versionData := make([]byte, 32)
+				n, readErr := rc.Read(versionData)
+				// Accept EOF for short version files.
+				if n > 0 && (readErr == nil || readErr.Error() == "EOF") {
+					version := strings.TrimSpace(string(versionData[:n]))
+					if version != "" {
+						metadata["pytorch_archive_version"] = version
+					}
+				}
+				_ = rc.Close()
+			}
+		case baseName == "model.py":
+			hasModelPy = true
+		case baseName == "constants.pkl":
+			hasConstants = true
+		case strings.HasSuffix(name, ".storage"):
+			tensorCount++
+		}
+	}
+
+	metadata["archive_files"] = files
+	metadata["has_data_pkl"] = hasDataPkl
+	metadata["has_version"] = hasVersion
+	metadata["has_model_py"] = hasModelPy
+	metadata["has_constants"] = hasConstants
+	metadata["tensor_storage_count"] = tensorCount
+
+	// Infer model type based on archive structure.
+	if hasModelPy {
+		metadata["model_type_hint"] = "TorchScript"
+	} else if hasDataPkl {
+		metadata["model_type_hint"] = "state_dict or full model"
+	}
+}
+
 // extractONNXMetadata extracts metadata from ONNX model files.
 func (d *Detector) extractONNXMetadata(data []byte, metadata map[string]interface{}) {
 	if len(data) < 10 {
@@ -542,17 +902,187 @@ func (d *Detector) extractONNXMetadata(data []byte, metadata map[string]interfac
 	}
 
 	// ONNX files are protobuf format.
-	// Check for protobuf wire type (field 1, type 2 = length-delimited for ir_version).
-	if data[0] == 0x08 {
-		metadata["format"] = "ONNX protobuf"
-		// Try to extract IR version (varint after field tag).
-		if len(data) > 1 {
-			irVersion := int(data[1])
-			if irVersion > 0 && irVersion < 20 {
-				metadata["ir_version"] = irVersion
+	// ModelProto fields (from onnx.proto):
+	// 1: ir_version (int64)
+	// 2: producer_name (string)
+	// 3: producer_version (string)
+	// 4: domain (string)
+	// 5: model_version (int64)
+	// 6: doc_string (string)
+	// 8: opset_import (repeated OpSetId)
+
+	metadata["format"] = "ONNX protobuf"
+
+	// Parse protobuf fields.
+	pos := 0
+	for pos < len(data) && pos < 4096 { // Limit parsing to first 4KB
+		if pos >= len(data) {
+			break
+		}
+
+		// Read field tag (varint).
+		fieldTag, n := d.readVarint(data[pos:])
+		if n == 0 {
+			break
+		}
+		pos += n
+
+		fieldNumber := fieldTag >> 3
+		wireType := fieldTag & 0x7
+
+		switch wireType {
+		case 0: // Varint
+			value, vn := d.readVarint(data[pos:])
+			if vn == 0 {
+				return
 			}
+			pos += vn
+
+			switch fieldNumber {
+			case 1:
+				metadata["ir_version"] = value
+			case 5:
+				metadata["model_version"] = value
+			}
+
+		case 2: // Length-delimited
+			length, ln := d.readVarint(data[pos:])
+			if ln == 0 {
+				return
+			}
+			pos += ln
+
+			if pos+int(length) > len(data) {
+				return
+			}
+
+			strData := data[pos : pos+int(length)]
+			pos += int(length)
+
+			switch fieldNumber {
+			case 2:
+				if isValidUTF8(strData) {
+					metadata["producer_name"] = string(strData)
+				}
+			case 3:
+				if isValidUTF8(strData) {
+					metadata["producer_version"] = string(strData)
+				}
+			case 4:
+				if isValidUTF8(strData) {
+					metadata["domain"] = string(strData)
+				}
+			case 6:
+				if isValidUTF8(strData) && len(strData) < 500 {
+					metadata["doc_string"] = string(strData)
+				}
+			case 8:
+				// opset_import - parse nested message for opset version.
+				d.parseONNXOpsetImport(strData, metadata)
+			}
+
+		default:
+			// Skip unknown wire types.
+			return
 		}
 	}
+}
+
+// parseONNXOpsetImport parses an OpSetId message from ONNX.
+func (d *Detector) parseONNXOpsetImport(data []byte, metadata map[string]interface{}) {
+	// OpSetId fields:
+	// 1: domain (string)
+	// 2: version (int64)
+
+	pos := 0
+	var domain string
+	var version int64
+
+	for pos < len(data) {
+		fieldTag, n := d.readVarint(data[pos:])
+		if n == 0 {
+			break
+		}
+		pos += n
+
+		fieldNumber := fieldTag >> 3
+		wireType := fieldTag & 0x7
+
+		switch wireType {
+		case 0: // Varint
+			value, vn := d.readVarint(data[pos:])
+			if vn == 0 {
+				return
+			}
+			pos += vn
+
+			if fieldNumber == 2 {
+				version = value
+			}
+
+		case 2: // Length-delimited
+			length, ln := d.readVarint(data[pos:])
+			if ln == 0 {
+				return
+			}
+			pos += ln
+
+			if pos+int(length) > len(data) {
+				return
+			}
+
+			if fieldNumber == 1 {
+				domain = string(data[pos : pos+int(length)])
+			}
+			pos += int(length)
+
+		default:
+			return
+		}
+	}
+
+	// Store opset info.
+	if domain == "" || domain == "ai.onnx" {
+		metadata["opset_version"] = version
+	}
+	if domain != "" && domain != "ai.onnx" {
+		if existing, ok := metadata["custom_domains"].([]string); ok {
+			metadata["custom_domains"] = append(existing, domain)
+		} else {
+			metadata["custom_domains"] = []string{domain}
+		}
+	}
+}
+
+// readVarint reads a protobuf varint from data.
+func (d *Detector) readVarint(data []byte) (value int64, bytesRead int) {
+	if len(data) == 0 {
+		return 0, 0
+	}
+
+	var result int64
+	var shift uint
+
+	for i := 0; i < len(data) && i < 10; i++ {
+		b := data[i]
+		result |= int64(b&0x7F) << shift
+		if b < 0x80 {
+			return result, i + 1
+		}
+		shift += 7
+	}
+
+	return 0, 0
+}
+
+// isValidUTF8 checks if data is valid UTF-8 and printable.
+func isValidUTF8(data []byte) bool {
+	for _, b := range data {
+		if b < 0x20 && b != '\n' && b != '\r' && b != '\t' {
+			return false
+		}
+	}
+	return true
 }
 
 // extractPickleMetadata extracts metadata from pickle files.
@@ -739,6 +1269,18 @@ func (d *Detector) readFile(path string) ([]byte, error) {
 	return sp.ReadFile(filename)
 }
 
+// readFileWithContext reads a file with context timeout support.
+func (d *Detector) readFileWithContext(ctx context.Context, path string) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// Perform the file read. Since file I/O is blocking, we check context
+	// before starting. For very large files, the caller's context timeout
+	// provides the actual deadline enforcement.
+	return d.readFile(path)
+}
+
 // notebookCell represents a cell in a Jupyter notebook.
 type notebookCell struct {
 	CellType string   `json:"cell_type"`
@@ -748,6 +1290,13 @@ type notebookCell struct {
 // notebook represents a Jupyter notebook structure.
 type notebook struct {
 	Cells []notebookCell `json:"cells"`
+}
+
+// NotebookParseResult contains cell-aware parsing results.
+type NotebookParseResult struct {
+	Code        string       // Concatenated code from all cells
+	CellImports []CellImport // Imports with cell locations
+	CellCount   int          // Total number of code cells
 }
 
 // parseNotebook parses a Jupyter notebook and extracts code from code cells.
@@ -777,6 +1326,153 @@ func (d *Detector) parseNotebook(path string) (string, error) {
 	}
 
 	return codeBuilder.String(), nil
+}
+
+// parseNotebookWithContext parses a notebook with context timeout support.
+func (d *Detector) parseNotebookWithContext(ctx context.Context, path string) (string, error) {
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	// Read file with context check.
+	data, err := d.readFileWithContext(ctx, path)
+	if err != nil {
+		return "", fmt.Errorf("read notebook: %w", err)
+	}
+
+	// Check context before parsing.
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	var nb notebook
+	if err := json.Unmarshal(data, &nb); err != nil {
+		return "", fmt.Errorf("parse notebook JSON: %w", err)
+	}
+
+	var codeBuilder strings.Builder
+	for _, cell := range nb.Cells {
+		// Only process code cells, skip markdown, raw cells.
+		if cell.CellType != "code" {
+			continue
+		}
+
+		// Source is an array of lines.
+		for _, line := range cell.Source {
+			codeBuilder.WriteString(line)
+		}
+		codeBuilder.WriteString("\n")
+	}
+
+	return codeBuilder.String(), nil
+}
+
+// parseNotebookWithCells parses a notebook and tracks cell locations for imports.
+func (d *Detector) parseNotebookWithCells(path string) (*NotebookParseResult, error) {
+	data, err := d.readFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read notebook: %w", err)
+	}
+
+	var nb notebook
+	if err := json.Unmarshal(data, &nb); err != nil {
+		return nil, fmt.Errorf("parse notebook JSON: %w", err)
+	}
+
+	result := &NotebookParseResult{
+		CellImports: make([]CellImport, 0),
+	}
+
+	var codeBuilder strings.Builder
+	codeCellIndex := 0
+
+	for _, cell := range nb.Cells {
+		// Only process code cells, skip markdown, raw cells.
+		if cell.CellType != "code" {
+			continue
+		}
+
+		codeCellIndex++
+
+		// Process each line in the cell.
+		for lineNum, line := range cell.Source {
+			codeBuilder.WriteString(line)
+
+			// Check for import statements.
+			trimmedLine := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmedLine, "import ") || strings.HasPrefix(trimmedLine, "from ") {
+				result.CellImports = append(result.CellImports, CellImport{
+					Import:     trimmedLine,
+					CellNumber: codeCellIndex,
+					LineInCell: lineNum + 1, // 1-indexed
+				})
+			}
+		}
+		codeBuilder.WriteString("\n")
+	}
+
+	result.Code = codeBuilder.String()
+	result.CellCount = codeCellIndex
+
+	return result, nil
+}
+
+// parseNotebookWithCellsContext parses a notebook with context and tracks cell locations.
+func (d *Detector) parseNotebookWithCellsContext(ctx context.Context, path string) (*NotebookParseResult, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	data, err := d.readFileWithContext(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("read notebook: %w", err)
+	}
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	var nb notebook
+	if err := json.Unmarshal(data, &nb); err != nil {
+		return nil, fmt.Errorf("parse notebook JSON: %w", err)
+	}
+
+	result := &NotebookParseResult{
+		CellImports: make([]CellImport, 0),
+	}
+
+	var codeBuilder strings.Builder
+	codeCellIndex := 0
+
+	for _, cell := range nb.Cells {
+		// Only process code cells, skip markdown, raw cells.
+		if cell.CellType != "code" {
+			continue
+		}
+
+		codeCellIndex++
+
+		// Process each line in the cell.
+		for lineNum, line := range cell.Source {
+			codeBuilder.WriteString(line)
+
+			// Check for import statements.
+			trimmedLine := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmedLine, "import ") || strings.HasPrefix(trimmedLine, "from ") {
+				result.CellImports = append(result.CellImports, CellImport{
+					Import:     trimmedLine,
+					CellNumber: codeCellIndex,
+					LineInCell: lineNum + 1, // 1-indexed
+				})
+			}
+		}
+		codeBuilder.WriteString("\n")
+	}
+
+	result.Code = codeBuilder.String()
+	result.CellCount = codeCellIndex
+
+	return result, nil
 }
 
 // uniqueStrings returns unique strings from a slice.
@@ -1031,15 +1727,15 @@ func (d *Detector) worker(ctx context.Context, tasks <-chan fileTask, result *co
 
 		ext := strings.ToLower(filepath.Ext(task.path))
 
-		// Check for Jupyter notebook.
+		// Check for Jupyter notebook with cell tracking.
 		if ext == ".ipynb" {
-			content, err := d.parseNotebook(task.path)
+			nbResult, err := d.parseNotebookWithCells(task.path)
 			if err != nil {
 				result.addError(fmt.Sprintf("parse notebook %s: %v", task.path, err))
 				continue
 			}
-			if content != "" {
-				d.detectFrameworksInContentConcurrent(content, task.path, result)
+			if nbResult != nil && nbResult.Code != "" {
+				d.detectFrameworksInNotebookConcurrent(nbResult, task.path, result)
 			}
 			continue
 		}
@@ -1090,4 +1786,192 @@ func (d *Detector) detectFrameworksInContentConcurrent(content, filePath string,
 			result.addFramework(detected)
 		}
 	}
+}
+
+// detectFrameworksInNotebookConcurrent detects ML frameworks with cell tracking for concurrent result.
+func (d *Detector) detectFrameworksInNotebookConcurrent(nbResult *NotebookParseResult, filePath string, result *concurrentResult) {
+	frameworks := d.detectFrameworksInNotebookResult(nbResult, filePath)
+	for _, fw := range frameworks {
+		result.addFramework(fw)
+	}
+}
+
+// GetCacheEntry retrieves a cached entry for a file path.
+// Returns nil if not found or if cache is disabled.
+func (d *Detector) GetCacheEntry(path string) *CacheEntry {
+	if !d.config.EnableCache {
+		return nil
+	}
+
+	if entry, ok := d.cache.Load(path); ok {
+		if ce, valid := entry.(*CacheEntry); valid {
+			return ce
+		}
+	}
+	return nil
+}
+
+// SetCacheEntry stores a cache entry for a file path.
+func (d *Detector) SetCacheEntry(path string, entry *CacheEntry) {
+	if !d.config.EnableCache {
+		return
+	}
+	d.cache.Store(path, entry)
+}
+
+// IsCacheValid checks if a cache entry is still valid for the given file.
+func (d *Detector) IsCacheValid(path string, entry *CacheEntry) bool {
+	if entry == nil {
+		return false
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	// Cache is valid if file modification time and size match.
+	return info.ModTime().Equal(entry.ModTime) && info.Size() == entry.Size
+}
+
+// ClearCache clears all cached entries.
+func (d *Detector) ClearCache() {
+	d.cache.Range(func(key, _ interface{}) bool {
+		d.cache.Delete(key)
+		return true
+	})
+}
+
+// CacheSize returns the number of entries in the cache.
+func (d *Detector) CacheSize() int {
+	count := 0
+	d.cache.Range(func(_, _ interface{}) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+// DetectWithCache detects ML frameworks and model files, using cache when possible.
+func (d *Detector) DetectWithCache(ctx context.Context, rootPath string) (*DetectionResult, error) {
+	if rootPath == "" {
+		return nil, ErrEmptyPath
+	}
+
+	absPath, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path: %w", err)
+	}
+
+	result := &DetectionResult{
+		Frameworks: make([]DetectedFramework, 0),
+		Models:     make([]DetectedModel, 0),
+		Errors:     make([]string, 0),
+	}
+
+	d.filesScanned = 0
+
+	walkErr := d.walkDirectory(ctx, absPath, func(path string, isDir bool, size int64) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if isDir {
+			// Check for TensorFlow SavedModel.
+			if filepath.Base(path) == "saved_model.pb" {
+				result.Models = append(result.Models, DetectedModel{
+					Path:      filepath.Dir(path),
+					Name:      "saved_model",
+					Type:      ModelTypeSavedModel,
+					Framework: FrameworkTensorFlow,
+				})
+			}
+			return nil
+		}
+
+		ext := strings.ToLower(filepath.Ext(path))
+
+		// Check for model files.
+		if modelType, ok := d.modelExtensions[ext]; ok {
+			info, statErr := os.Stat(path)
+			if statErr == nil {
+				result.Models = append(result.Models, DetectedModel{
+					Path:      path,
+					Name:      filepath.Base(path),
+					Type:      modelType,
+					Framework: d.inferFramework(modelType),
+					SizeBytes: info.Size(),
+					Metadata:  d.extractMetadata(path, modelType),
+				})
+			}
+		}
+
+		// Check for Python files using cache.
+		if ext == ".py" || ext == ".pyx" || ext == ".pyw" || ext == ".ipynb" {
+			// Try to use cache.
+			if d.config.EnableCache {
+				if cached := d.GetCacheEntry(path); cached != nil && d.IsCacheValid(path, cached) {
+					result.Frameworks = append(result.Frameworks, cached.Frameworks...)
+					return nil
+				}
+			}
+
+			var detectedFrameworks []DetectedFramework
+
+			if ext == ".ipynb" {
+				// Use cell-aware parsing for notebooks.
+				nbResult, readErr := d.parseNotebookWithCells(path)
+				if readErr != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", path, readErr))
+					return nil
+				}
+
+				detectedFrameworks = d.detectFrameworksInNotebookResult(nbResult, path)
+			} else {
+				data, readErr := d.readFile(path)
+				if readErr != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", path, readErr))
+					return nil
+				}
+				content := string(data)
+
+				detectedFrameworks = make([]DetectedFramework, 0)
+				for framework, pattern := range d.frameworkPatterns {
+					matches := pattern.FindAllString(content, -1)
+					if len(matches) > 0 {
+						detected := DetectedFramework{
+							Name:         framework,
+							SourceFile:   path,
+							Imports:      d.uniqueStrings(matches),
+							Confidence:   d.calculateConfidence(content, framework),
+							IsMLPipeline: d.isMLPipeline(content),
+						}
+						detectedFrameworks = append(detectedFrameworks, detected)
+					}
+				}
+			}
+
+			result.Frameworks = append(result.Frameworks, detectedFrameworks...)
+
+			// Cache the result.
+			if d.config.EnableCache && len(detectedFrameworks) > 0 {
+				info, statErr := os.Stat(path)
+				if statErr == nil {
+					d.SetCacheEntry(path, &CacheEntry{
+						Frameworks: detectedFrameworks,
+						ModTime:    info.ModTime(),
+						Size:       info.Size(),
+					})
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if walkErr != nil && walkErr != context.Canceled {
+		result.Errors = append(result.Errors, walkErr.Error())
+	}
+
+	return result, nil
 }

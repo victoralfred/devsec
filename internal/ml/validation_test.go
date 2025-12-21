@@ -539,3 +539,170 @@ func TestToFloat64(t *testing.T) {
 		}
 	}
 }
+
+// Benchmark tests for drift detection and data validation.
+
+func BenchmarkDriftDetectionSmall(b *testing.B) {
+	baseline := make([]interface{}, 100)
+	current := make([]interface{}, 100)
+	for i := 0; i < 100; i++ {
+		baseline[i] = float64(i)
+		current[i] = float64(i + 1)
+	}
+
+	detector := NewDriftDetector(0.1)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = detector.DetectDrift(ctx, baseline, current)
+	}
+}
+
+func BenchmarkDriftDetectionMedium(b *testing.B) {
+	baseline := make([]interface{}, 1000)
+	current := make([]interface{}, 1000)
+	for i := 0; i < 1000; i++ {
+		baseline[i] = float64(i)
+		current[i] = float64(i) * 1.1 // Slight drift
+	}
+
+	detector := NewDriftDetector(0.1)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = detector.DetectDrift(ctx, baseline, current)
+	}
+}
+
+func BenchmarkDriftDetectionLarge(b *testing.B) {
+	baseline := make([]interface{}, 10000)
+	current := make([]interface{}, 10000)
+	for i := 0; i < 10000; i++ {
+		baseline[i] = float64(i)
+		current[i] = float64(i) * 1.2 // More significant drift
+	}
+
+	detector := NewDriftDetector(0.1)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = detector.DetectDrift(ctx, baseline, current)
+	}
+}
+
+func BenchmarkDataValidationSmall(b *testing.B) {
+	schema := &DataSchema{
+		Name: "benchmark-schema",
+		Columns: []ColumnSchema{
+			{Name: "id", Type: DataTypeInteger, Required: true},
+			{Name: "value", Type: DataTypeFloat, Required: true},
+		},
+	}
+	validator := NewDataValidator(schema)
+
+	// Create 100 rows of data.
+	data := make([]map[string]interface{}, 100)
+	for i := range data {
+		data[i] = map[string]interface{}{
+			"id":    i,
+			"value": float64(i) * 1.5,
+		}
+	}
+
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = validator.Validate(ctx, data)
+	}
+}
+
+func BenchmarkDataValidationLarge(b *testing.B) {
+	schema := &DataSchema{
+		Name: "benchmark-schema-large",
+		Columns: []ColumnSchema{
+			{Name: "id", Type: DataTypeInteger, Required: true},
+			{Name: "name", Type: DataTypeString, Required: true},
+			{Name: "value", Type: DataTypeFloat, Required: true},
+			{Name: "active", Type: DataTypeBoolean, Required: false},
+			{Name: "category", Type: DataTypeCategorical, Required: false},
+		},
+	}
+	validator := NewDataValidator(schema)
+
+	// Create 10000 rows of data.
+	data := make([]map[string]interface{}, 10000)
+	for i := range data {
+		data[i] = map[string]interface{}{
+			"id":       i,
+			"name":     "item",
+			"value":    float64(i) * 1.5,
+			"active":   i%2 == 0,
+			"category": "cat",
+		}
+	}
+
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = validator.Validate(ctx, data)
+	}
+}
+
+// Fuzz tests for data validation.
+
+func FuzzDataValidation(f *testing.F) {
+	// Add seed corpus.
+	f.Add("name", "value", 10, true)
+	f.Add("id", "data", 0, false)
+	f.Add("field_1", "test_value", -5, true)
+
+	schema := &DataSchema{
+		Name: "fuzz-schema",
+		Columns: []ColumnSchema{
+			{Name: "field", Type: DataTypeString, Required: true},
+		},
+	}
+	validator := NewDataValidator(schema)
+	ctx := context.Background()
+
+	f.Fuzz(func(t *testing.T, fieldName, fieldValue string, intVal int, boolVal bool) {
+		data := []map[string]interface{}{
+			{
+				fieldName: fieldValue,
+				"int":     intVal,
+				"bool":    boolVal,
+			},
+		}
+
+		// Should not panic.
+		_, _ = validator.Validate(ctx, data)
+	})
+}
+
+func FuzzDriftDetection(f *testing.F) {
+	// Add seed corpus.
+	f.Add(1.0, 2.0, 0.1)
+	f.Add(0.0, 0.0, 0.5)
+	f.Add(-100.0, 100.0, 0.01)
+
+	detector := NewDriftDetector(0.1)
+	ctx := context.Background()
+
+	f.Fuzz(func(t *testing.T, baselineVal, currentVal, threshold float64) {
+		// Skip invalid thresholds.
+		if threshold <= 0 || threshold > 1 {
+			return
+		}
+
+		baseline := []interface{}{baselineVal}
+		current := []interface{}{currentVal}
+
+		// Should not panic.
+		_, _ = detector.DetectDrift(ctx, baseline, current)
+	})
+}
