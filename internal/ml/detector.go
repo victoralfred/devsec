@@ -1727,56 +1727,6 @@ func (d *Detector) DetectConcurrent(ctx context.Context, rootPath string) (*Dete
 	}, nil
 }
 
-// collectFileTasks collects all file tasks from the directory tree.
-// DEPRECATED: This method is kept for backward compatibility but is no longer used.
-// DetectConcurrent now uses streaming approach instead to avoid loading all tasks into memory.
-func (d *Detector) collectFileTasks(ctx context.Context, rootPath string, tasks *[]fileTask) error {
-	return d.walkDirectory(ctx, rootPath, func(path string, isDir bool, size int64) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		*tasks = append(*tasks, fileTask{
-			path:  path,
-			isDir: isDir,
-			size:  size,
-		})
-		return nil
-	})
-}
-
-// processTasksConcurrently processes file tasks using a worker pool.
-// DEPRECATED: This method is no longer used. DetectConcurrent now uses streaming approach.
-// Kept for backward compatibility but may be removed in future versions.
-func (d *Detector) processTasksConcurrently(ctx context.Context, tasks []fileTask, result *concurrentResult, workerCount int) {
-	taskChan := make(chan fileTask, len(tasks))
-	var wg sync.WaitGroup
-
-	// Start workers.
-	for i := 0; i < workerCount; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			d.worker(ctx, taskChan, result)
-		}()
-	}
-
-	// Send tasks to workers.
-	for _, task := range tasks {
-		select {
-		case <-ctx.Done():
-			close(taskChan)
-			wg.Wait()
-			return
-		case taskChan <- task:
-		}
-	}
-	close(taskChan)
-
-	// Wait for all workers to complete.
-	wg.Wait()
-}
-
 // worker processes file tasks from the channel.
 func (d *Detector) worker(ctx context.Context, tasks <-chan fileTask, result *concurrentResult) {
 	pythonExts := map[string]bool{".py": true, ".pyx": true, ".pyw": true}
