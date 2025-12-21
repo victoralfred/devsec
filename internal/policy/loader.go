@@ -17,12 +17,19 @@ type LoaderConfig struct {
 	MaxDepth     int
 }
 
+const (
+	// MaxPolicyFiles is the maximum number of policy files to load to prevent DoS.
+	MaxPolicyFiles = 1000
+	// DefaultMaxDepth is the default maximum recursion depth.
+	DefaultMaxDepth = 5
+)
+
 // DefaultLoaderConfig returns the default loader configuration.
 func DefaultLoaderConfig() LoaderConfig {
 	return LoaderConfig{
 		Recursive:    true,
 		ValidateOnly: false,
-		MaxDepth:     5,
+		MaxDepth:     DefaultMaxDepth,
 	}
 }
 
@@ -55,6 +62,14 @@ func (e *Engine) LoadDirectory(ctx context.Context, dirPath string, config Loade
 		return result, fmt.Errorf("context canceled: %w", ctxErr)
 	}
 
+	// Validate directory path
+	if dirPath == "" {
+		return result, fmt.Errorf("directory path cannot be empty")
+	}
+	if strings.Contains(dirPath, "..") {
+		return result, fmt.Errorf("directory path contains invalid characters: %s", dirPath)
+	}
+
 	absPath, err := filepath.Abs(dirPath)
 	if err != nil {
 		return result, fmt.Errorf("failed to resolve directory path: %w", err)
@@ -75,6 +90,15 @@ func (e *Engine) LoadDirectory(ctx context.Context, dirPath string, config Loade
 		// Check for context cancellation.
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return result, fmt.Errorf("context canceled: %w", ctxErr)
+		}
+
+		// Check policy file limit
+		if result.Loaded+result.Failed >= MaxPolicyFiles {
+			result.Errors = append(result.Errors, LoadError{
+				Path:    absPath,
+				Message: fmt.Sprintf("policy file limit exceeded: %d (max %d)", result.Loaded+result.Failed, MaxPolicyFiles),
+			})
+			break
 		}
 
 		entryPath := filepath.Join(absPath, entry.Name())

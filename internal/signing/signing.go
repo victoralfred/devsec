@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/victoralfred/gowritter/safepath"
@@ -162,6 +163,17 @@ func GenerateKeyPair() (*KeyPair, error) {
 func LoadKeyPair(ctx context.Context, privateKeyPath, publicKeyPath string) (*KeyPair, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
+	}
+
+	// Validate paths
+	if privateKeyPath == "" {
+		return nil, fmt.Errorf("private key path cannot be empty")
+	}
+	if publicKeyPath == "" {
+		return nil, fmt.Errorf("public key path cannot be empty")
+	}
+	if strings.Contains(privateKeyPath, "..") || strings.Contains(publicKeyPath, "..") {
+		return nil, fmt.Errorf("key path contains invalid characters")
 	}
 
 	// Load private key.

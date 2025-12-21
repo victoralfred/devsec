@@ -68,6 +68,22 @@ func (e *Engine) ValidatePolicy(ctx context.Context, policyPath string) (Validat
 		return result, fmt.Errorf("context canceled: %w", ctxErr)
 	}
 
+	// Validate path
+	if policyPath == "" {
+		result.Errors = append(result.Errors, ValidationError{
+			Message:  "policy path cannot be empty",
+			Severity: "error",
+		})
+		return result, nil
+	}
+	if strings.Contains(policyPath, "..") {
+		result.Errors = append(result.Errors, ValidationError{
+			Message:  fmt.Sprintf("policy path contains invalid characters: %s", policyPath),
+			Severity: "error",
+		})
+		return result, nil
+	}
+
 	// Read the policy file.
 	absPath, err := filepath.Abs(policyPath)
 	if err != nil {

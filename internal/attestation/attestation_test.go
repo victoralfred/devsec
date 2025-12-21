@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/victoralfred/devsec/internal/signing"
+	"github.com/victoralfred/gowritter/safepath"
 )
 
 func TestNewGenerator(t *testing.T) {
@@ -192,8 +192,14 @@ func TestCreateSubjectFromFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
 	content := []byte("test content for hashing")
-	if err := os.WriteFile(testFile, content, 0o600); err != nil {
-		t.Fatalf("write test file: %v", err)
+
+	// Use safepath for file I/O (mandatory requirement)
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+	if writeErr := sp.WriteFile("test.txt", content, 0o600); writeErr != nil {
+		t.Fatalf("write test file: %v", writeErr)
 	}
 
 	subject, err := CreateSubjectFromFile(ctx, testFile)

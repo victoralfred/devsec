@@ -38,7 +38,9 @@ func TestAddFindings(t *testing.T) {
 		{ID: "test-2", Severity: model.SeverityLow},
 	}
 
-	a.AddFindings("gitleaks", findings)
+	if err := a.AddFindings("gitleaks", findings); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
 
 	if a.FindingCount() != 2 {
 		t.Errorf("expected 2 findings, got %d", a.FindingCount())
@@ -63,7 +65,9 @@ func TestAddResult(t *testing.T) {
 		},
 	}
 
-	a.AddResult(result)
+	if err := a.AddResult(result); err != nil {
+		t.Fatalf("AddResult() error = %v", err)
+	}
 
 	if a.FindingCount() != 1 {
 		t.Errorf("expected 1 finding, got %d", a.FindingCount())
@@ -80,12 +84,16 @@ func TestAddResult(t *testing.T) {
 // TestAggregateBasic tests basic aggregation.
 func TestAggregateBasic(t *testing.T) {
 	a := New()
-	a.AddFindings("scanner1", []model.Finding{
+	if err := a.AddFindings("scanner1", []model.Finding{
 		{ID: "f1", Severity: model.SeverityCritical, Rule: "rule1", Location: model.Location{File: "file1.go"}},
-	})
-	a.AddFindings("scanner2", []model.Finding{
+	}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
+	if err := a.AddFindings("scanner2", []model.Finding{
 		{ID: "f2", Severity: model.SeverityHigh, Rule: "rule2", Location: model.Location{File: "file2.go"}},
-	})
+	}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
 
 	ctx := context.Background()
 	report, err := a.Aggregate(ctx)
@@ -120,8 +128,12 @@ func TestAggregateDeduplication(t *testing.T) {
 		},
 	}
 
-	a.AddFindings("gitleaks", []model.Finding{finding})
-	a.AddFindings("trivy", []model.Finding{finding})
+	if err := a.AddFindings("gitleaks", []model.Finding{finding}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
+	if err := a.AddFindings("trivy", []model.Finding{finding}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
 
 	ctx := context.Background()
 	report, err := a.Aggregate(ctx)
@@ -150,8 +162,12 @@ func TestAggregateWithoutDeduplication(t *testing.T) {
 		},
 	}
 
-	a.AddFindings("gitleaks", []model.Finding{finding})
-	a.AddFindings("trivy", []model.Finding{finding})
+	if err := a.AddFindings("gitleaks", []model.Finding{finding}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
+	if err := a.AddFindings("trivy", []model.Finding{finding}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
 
 	ctx := context.Background()
 	report, err := a.Aggregate(ctx)
@@ -168,12 +184,14 @@ func TestAggregateWithoutDeduplication(t *testing.T) {
 // TestAggregateSorting tests finding sorting by severity.
 func TestAggregateSorting(t *testing.T) {
 	a := New()
-	a.AddFindings("scanner", []model.Finding{
+	if err := a.AddFindings("scanner", []model.Finding{
 		{ID: "low", Severity: model.SeverityLow, Rule: "r1", Location: model.Location{File: "a.go"}},
 		{ID: "critical", Severity: model.SeverityCritical, Rule: "r2", Location: model.Location{File: "b.go"}},
 		{ID: "medium", Severity: model.SeverityMedium, Rule: "r3", Location: model.Location{File: "c.go"}},
 		{ID: "high", Severity: model.SeverityHigh, Rule: "r4", Location: model.Location{File: "d.go"}},
-	})
+	}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
 
 	ctx := context.Background()
 	report, err := a.Aggregate(ctx)
@@ -202,9 +220,11 @@ func TestAggregateSorting(t *testing.T) {
 // TestAggregateContextCancellation tests context cancellation handling.
 func TestAggregateContextCancellation(t *testing.T) {
 	a := New()
-	a.AddFindings("scanner", []model.Finding{
+	if err := a.AddFindings("scanner", []model.Finding{
 		{ID: "f1", Severity: model.SeverityHigh},
-	})
+	}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -342,11 +362,18 @@ func TestAggregateEmptyFindings(t *testing.T) {
 // TestBuildMetadata tests metadata generation.
 func TestBuildMetadata(t *testing.T) {
 	a := New()
-	a.AddFindings("gitleaks", []model.Finding{{ID: "f1"}})
-	a.AddFindings("semgrep", []model.Finding{{ID: "f2"}})
-	a.AddFindings("trivy", []model.Finding{{ID: "f3"}})
+	if err := a.AddFindings("gitleaks", []model.Finding{{ID: "f1"}}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
+	if err := a.AddFindings("semgrep", []model.Finding{{ID: "f2"}}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
+	if err := a.AddFindings("trivy", []model.Finding{{ID: "f3"}}); err != nil {
+		t.Fatalf("AddFindings() error = %v", err)
+	}
 
-	metadata := a.buildMetadata()
+	results := a.GetScannerResults()
+	metadata := a.buildMetadata(results)
 
 	if _, ok := metadata["scanners"]; !ok {
 		t.Error("expected scanners in metadata")

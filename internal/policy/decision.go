@@ -102,6 +102,14 @@ type Violation struct {
 
 // Check evaluates findings against the loaded policy.
 func (dp *DecisionPoint) Check(ctx context.Context, findings []model.Finding) (CheckResult, error) {
+	// Validate inputs
+	if dp == nil {
+		return CheckResult{}, fmt.Errorf("decision point cannot be nil")
+	}
+	if dp.engine == nil {
+		return CheckResult{}, fmt.Errorf("policy engine cannot be nil")
+	}
+
 	start := time.Now()
 
 	results, err := dp.engine.Evaluate(ctx, findings)
@@ -114,6 +122,9 @@ func (dp *DecisionPoint) Check(ctx context.Context, findings []model.Finding) (C
 	}
 
 	// Use the first result (we only have one policy loaded).
+	if results[0].PolicyName == "" {
+		return CheckResult{}, fmt.Errorf("invalid policy result: missing policy name")
+	}
 	evalResult := results[0]
 	decision := evalResult.Decision
 
@@ -182,7 +193,7 @@ func (dp *DecisionPoint) generateViolations(findings []model.Finding, decision D
 // generateSummary creates a human-readable summary.
 func (dp *DecisionPoint) generateSummary(result CheckResult, findings []model.Finding) string {
 	var builder strings.Builder
-	builder.Grow(256)
+	builder.Grow(512) // Increased capacity for better performance
 
 	if result.Passed {
 		builder.WriteString("Policy check PASSED. ")

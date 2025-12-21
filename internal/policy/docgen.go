@@ -13,6 +13,11 @@ import (
 	"github.com/victoralfred/gowritter/safepath"
 )
 
+const (
+	// MaxDocs is the maximum number of policy docs to generate to prevent DoS.
+	MaxDocs = 1000
+)
+
 // Doc represents documentation for a policy.
 type Doc struct {
 	GeneratedAt time.Time       `json:"generated_at"`
@@ -53,6 +58,14 @@ func (e *Engine) GenerateDocumentation(ctx context.Context, policyPath string) (
 	// Check context.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return doc, fmt.Errorf("context canceled: %w", ctxErr)
+	}
+
+	// Validate path
+	if policyPath == "" {
+		return doc, fmt.Errorf("policy path cannot be empty")
+	}
+	if strings.Contains(policyPath, "..") {
+		return doc, fmt.Errorf("policy path contains invalid characters: %s", policyPath)
 	}
 
 	// Read the policy file.
@@ -311,7 +324,15 @@ func FormatDocumentationJSON(doc Doc) (string, error) {
 
 // GenerateDirectoryDocs generates documentation for all policies in a directory.
 func (e *Engine) GenerateDirectoryDocs(ctx context.Context, dirPath string) ([]Doc, error) {
-	docs := make([]Doc, 0)
+	docs := make([]Doc, 0, 100) // Pre-allocate with capacity
+
+	// Validate path
+	if dirPath == "" {
+		return docs, fmt.Errorf("directory path cannot be empty")
+	}
+	if strings.Contains(dirPath, "..") {
+		return docs, fmt.Errorf("directory path contains invalid characters: %s", dirPath)
+	}
 
 	absPath, err := filepath.Abs(dirPath)
 	if err != nil {
@@ -346,6 +367,11 @@ func (e *Engine) GenerateDirectoryDocs(ctx context.Context, dirPath string) ([]D
 		}
 		if testPattern.MatchString(name) {
 			continue
+		}
+
+		// Check limit
+		if len(docs) >= MaxDocs {
+			return docs, fmt.Errorf("documentation limit exceeded: %d (max %d)", len(docs), MaxDocs)
 		}
 
 		policyPath := filepath.Join(absPath, name)

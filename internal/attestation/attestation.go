@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/victoralfred/devsec/internal/signing"
@@ -158,6 +159,11 @@ func (g *Generator) GenerateProvenance(ctx context.Context, subjects []Subject, 
 		return nil, ctx.Err()
 	}
 
+	// Validate subjects
+	if len(subjects) == 0 {
+		return nil, fmt.Errorf("subjects cannot be empty")
+	}
+
 	now := time.Now().UTC()
 	prov := &SLSAProvenance{
 		BuildDefinition: BuildDefinition{
@@ -255,6 +261,14 @@ func CreateSubjectFromFile(ctx context.Context, filePath string) (*Subject, erro
 		return nil, ctx.Err()
 	}
 
+	// Validate file path
+	if filePath == "" {
+		return nil, fmt.Errorf("file path cannot be empty")
+	}
+	if strings.Contains(filePath, "..") {
+		return nil, fmt.Errorf("file path contains invalid characters: %s", filePath)
+	}
+
 	dir := filepath.Dir(filePath)
 	filename := filepath.Base(filePath)
 
@@ -295,6 +309,14 @@ func SignStatement(ctx context.Context, stmt *Statement, signer *signing.Signer)
 		return nil, ctx.Err()
 	}
 
+	// Validate inputs
+	if stmt == nil {
+		return nil, fmt.Errorf("statement cannot be nil")
+	}
+	if signer == nil {
+		return nil, fmt.Errorf("signer cannot be nil")
+	}
+
 	// Serialize statement to JSON.
 	payload, err := json.Marshal(stmt)
 	if err != nil {
@@ -326,7 +348,21 @@ func VerifyEnvelope(ctx context.Context, env *Envelope, verifier *signing.Verifi
 		return ctx.Err()
 	}
 
+	// Validate inputs
+	if env == nil {
+		return fmt.Errorf("envelope cannot be nil")
+	}
+	if verifier == nil {
+		return fmt.Errorf("verifier cannot be nil")
+	}
+	if len(env.Signatures) == 0 {
+		return fmt.Errorf("envelope must contain at least one signature")
+	}
+
 	// Decode payload.
+	if env.Payload == "" {
+		return fmt.Errorf("envelope payload cannot be empty")
+	}
 	payload, err := decodeBase64(env.Payload)
 	if err != nil {
 		return fmt.Errorf("decode payload: %w", err)
@@ -357,9 +393,20 @@ func VerifyEnvelope(ctx context.Context, env *Envelope, verifier *signing.Verifi
 
 // ExtractStatement extracts the statement from an envelope.
 func ExtractStatement(env *Envelope) (*Statement, error) {
+	if env == nil {
+		return nil, fmt.Errorf("envelope cannot be nil")
+	}
+	if env.Payload == "" {
+		return nil, fmt.Errorf("envelope payload cannot be empty")
+	}
+
 	payload, err := decodeBase64(env.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("decode payload: %w", err)
+	}
+
+	if len(payload) == 0 {
+		return nil, fmt.Errorf("decoded payload is empty")
 	}
 
 	var stmt Statement
