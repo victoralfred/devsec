@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -140,7 +141,12 @@ func outputJSON(cmd *cobra.Command, findings []model.Finding) error {
 		return writeToFile(outputFile, data)
 	}
 
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
+	if cmd != nil {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
+	} else {
+		// Fallback to stdout if command is nil
+		_, _ = fmt.Fprintln(os.Stdout, string(data))
+	}
 	return nil
 }
 

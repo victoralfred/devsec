@@ -23,6 +23,9 @@ var (
 // ErrPolicyViolation is returned when policy check fails.
 var ErrPolicyViolation = errors.New("policy violation")
 
+// recursive enables recursive directory scanning.
+var recursive bool
+
 // NewPolicyCmd creates the policy command.
 func NewPolicyCmd() *cobra.Command {
 	policyCmd := &cobra.Command{
@@ -32,6 +35,8 @@ func NewPolicyCmd() *cobra.Command {
 	}
 
 	policyCmd.AddCommand(NewPolicyCheckCmd())
+	policyCmd.AddCommand(NewPolicyValidateCmd())
+	policyCmd.AddCommand(NewPolicyDocsCmd())
 
 	return policyCmd
 }
@@ -202,4 +207,266 @@ func outputPolicyText(cmd *cobra.Command, result policy.CheckResult, dp *policy.
 	}
 
 	return nil
+}
+
+// NewPolicyValidateCmd creates the policy validate subcommand.
+func NewPolicyValidateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "validate [path]",
+		Short: "Validate policy files",
+		Long: `Validate Rego policy files for syntax errors and compatibility.
+
+If path is a directory, validates all .rego files in it.
+If path is a file, validates that single file.
+Use --recursive to validate subdirectories as well.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runPolicyValidate,
+	}
+
+	cmd.Flags().BoolVarP(&recursive, "recursive", "r", true, "recursively validate subdirectories")
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "output format (text, json)")
+
+	return cmd
+}
+
+func runPolicyValidate(cmd *cobra.Command, args []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	path := "."
+	if len(args) > 0 {
+		path = args[0]
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("failed to resolve path: %w", err)
+	}
+
+	engine := policy.New()
+	defer func() {
+		_ = engine.Close(ctx)
+	}()
+
+	// Check if path is a file or directory.
+	sp, spErr := safepath.New(filepath.Dir(absPath))
+	if spErr != nil {
+		return fmt.Errorf("path not accessible: %w", spErr)
+	}
+
+	info, statErr := sp.Stat(filepath.Base(absPath))
+	if statErr != nil {
+		return fmt.Errorf("path not found: %w", statErr)
+	}
+
+	var results []policy.ValidationResult
+
+	if info.IsDir() {
+		// Validate directory.
+		config := policy.DefaultLoaderConfig()
+		config.Recursive = recursive
+		config.ValidateOnly = true
+
+		loadResult, loadErr := engine.LoadDirectory(ctx, absPath, config)
+		if loadErr != nil {
+			return fmt.Errorf("failed to validate directory: %w", loadErr)
+		}
+
+		// Convert load errors to validation results.
+		for _, le := range loadResult.Errors {
+			results = append(results, policy.ValidationResult{
+				Path:  le.Path,
+				Valid: false,
+				Errors: []policy.ValidationError{{
+					Message:  le.Message,
+					Severity: "error",
+				}},
+			})
+		}
+
+		// Validate each policy in detail.
+		for _, p := range loadResult.Policies {
+			result, valErr := engine.ValidatePolicy(ctx, p.Path)
+			if valErr != nil {
+				return fmt.Errorf("validation failed: %w", valErr)
+			}
+			results = append(results, result)
+		}
+	} else {
+		// Validate single file.
+		result, valErr := engine.ValidatePolicy(ctx, absPath)
+		if valErr != nil {
+			return fmt.Errorf("validation failed: %w", valErr)
+		}
+		results = append(results, result)
+	}
+
+	return outputValidationResults(cmd, results)
+}
+
+func outputValidationResults(cmd *cobra.Command, results []policy.ValidationResult) error {
+	switch outputFormat {
+	case "json":
+		data, err := json.MarshalIndent(results, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
+
+	case "text":
+		validCount := 0
+		invalidCount := 0
+
+		for _, r := range results {
+			if r.Valid {
+				validCount++
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[VALID] %s\n", r.Path)
+			} else {
+				invalidCount++
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[INVALID] %s\n", r.Path)
+				for _, e := range r.Errors {
+					if e.Line > 0 {
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Line %d: %s\n", e.Line, e.Message)
+					} else {
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", e.Message)
+					}
+				}
+			}
+			for _, w := range r.Warnings {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Warning: %s\n", w)
+			}
+		}
+
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nValidation complete: %d valid, %d invalid\n", validCount, invalidCount)
+
+		if invalidCount > 0 {
+			return fmt.Errorf("%d policy file(s) invalid", invalidCount)
+		}
+
+	default:
+		return fmt.Errorf("unknown format: %s", outputFormat)
+	}
+
+	return nil
+}
+
+// NewPolicyDocsCmd creates the policy docs subcommand.
+func NewPolicyDocsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "docs [path]",
+		Short: "Generate policy documentation",
+		Long: `Generate documentation for Rego policy files.
+
+If path is a directory, generates docs for all .rego files in it.
+If path is a file, generates docs for that single file.
+
+The documentation includes policy metadata, rules, and descriptions
+extracted from comments and annotations.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runPolicyDocs,
+	}
+
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "output format (text, json, markdown)")
+	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "output file (default is stdout)")
+
+	return cmd
+}
+
+func runPolicyDocs(cmd *cobra.Command, args []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	path := "."
+	if len(args) > 0 {
+		path = args[0]
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("failed to resolve path: %w", err)
+	}
+
+	engine := policy.New()
+	defer func() {
+		_ = engine.Close(ctx)
+	}()
+
+	// Check if path is a file or directory.
+	sp, spErr := safepath.New(filepath.Dir(absPath))
+	if spErr != nil {
+		return fmt.Errorf("path not accessible: %w", spErr)
+	}
+
+	info, statErr := sp.Stat(filepath.Base(absPath))
+	if statErr != nil {
+		return fmt.Errorf("path not found: %w", statErr)
+	}
+
+	var docs []policy.Doc
+
+	if info.IsDir() {
+		dirDocs, docErr := engine.GenerateDirectoryDocs(ctx, absPath)
+		if docErr != nil {
+			return fmt.Errorf("failed to generate docs: %w", docErr)
+		}
+		docs = dirDocs
+	} else {
+		doc, docErr := engine.GenerateDocumentation(ctx, absPath)
+		if docErr != nil {
+			return fmt.Errorf("failed to generate docs: %w", docErr)
+		}
+		docs = append(docs, doc)
+	}
+
+	if len(docs) == 0 {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No policy files found.")
+		return nil
+	}
+
+	return outputPolicyDocs(cmd, docs)
+}
+
+func outputPolicyDocs(cmd *cobra.Command, docs []policy.Doc) error {
+	var output string
+
+	switch outputFormat {
+	case "json":
+		data, err := json.MarshalIndent(docs, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		output = string(data)
+
+	case "text", "markdown":
+		parts := make([]string, 0, len(docs))
+		for i := range docs {
+			parts = append(parts, policy.FormatDocumentation(docs[i]))
+		}
+		output = joinStringsWithSep(parts, "\n---\n\n")
+
+	default:
+		return fmt.Errorf("unknown format: %s", outputFormat)
+	}
+
+	if outputFile != "" {
+		return writeToFile(outputFile, []byte(output))
+	}
+
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), output)
+	return nil
+}
+
+// joinStringsWithSep joins strings with a separator.
+func joinStringsWithSep(parts []string, sep string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	result := parts[0]
+	for i := 1; i < len(parts); i++ {
+		result += sep + parts[i]
+	}
+	return result
 }
