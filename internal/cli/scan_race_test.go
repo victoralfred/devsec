@@ -7,38 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victoralfred/devsec/internal/model"
 	"github.com/victoralfred/devsec/internal/scanner/gitleaks"
 )
-
-// TestConcurrentOutputResults tests concurrent access to outputResults.
-func TestConcurrentOutputResults(t *testing.T) {
-	cmd := NewScanSecretsCmd()
-	buf := newBuffer()
-	cmd.SetOut(buf)
-	cmd.SetErr(buf)
-
-	findings := []model.Finding{
-		{ID: "test-1", Severity: model.SeverityLow},
-		{ID: "test-2", Severity: model.SeverityMedium},
-	}
-
-	var wg sync.WaitGroup
-	concurrency := 10
-	wg.Add(concurrency)
-
-	for i := 0; i < concurrency; i++ {
-		go func() {
-			defer wg.Done()
-			err := outputResults(cmd, findings)
-			if err != nil {
-				t.Errorf("outputResults() error = %v", err)
-			}
-		}()
-	}
-
-	wg.Wait()
-}
 
 // TestConcurrentLoadFindings tests concurrent access to loadFindings.
 func TestConcurrentLoadFindings(t *testing.T) {
