@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/victoralfred/gowritter/safepath"
 )
@@ -99,6 +101,16 @@ type DetectorConfig struct {
 	MaxFilesToScan  int      `json:"max_files_to_scan"`
 	MaxDepth        int      `json:"max_depth"`
 	WorkerCount     int      `json:"worker_count"`
+	EnableCache     bool     `json:"enable_cache"`
+}
+
+// CacheEntry represents a cached file detection result.
+// Fields ordered for optimal memory alignment.
+type CacheEntry struct {
+	ModTime    time.Time           `json:"mod_time"`
+	Frameworks []DetectedFramework `json:"frameworks,omitempty"`
+	Models     []DetectedModel     `json:"models,omitempty"`
+	Size       int64               `json:"size"`
 }
 
 // DefaultDetectorConfig returns the default detector configuration.
@@ -116,6 +128,7 @@ func DefaultDetectorConfig() DetectorConfig {
 		MaxDepth:       50,
 		MaxFilesToScan: 10000,
 		WorkerCount:    workerCount,
+		EnableCache:    true,
 		ExcludePatterns: []string{
 			"**/node_modules/**",
 			"**/.git/**",
@@ -129,6 +142,7 @@ func DefaultDetectorConfig() DetectorConfig {
 
 // Detector detects ML frameworks and model files in a project.
 type Detector struct {
+	cache              sync.Map // map[string]*CacheEntry
 	frameworkPatterns  map[Framework]*regexp.Regexp
 	confidencePatterns map[Framework][]*regexp.Regexp
 	pipelineIndicators []*regexp.Regexp
@@ -1090,4 +1104,180 @@ func (d *Detector) detectFrameworksInContentConcurrent(content, filePath string,
 			result.addFramework(detected)
 		}
 	}
+}
+
+// GetCacheEntry retrieves a cached entry for a file path.
+// Returns nil if not found or if cache is disabled.
+func (d *Detector) GetCacheEntry(path string) *CacheEntry {
+	if !d.config.EnableCache {
+		return nil
+	}
+
+	if entry, ok := d.cache.Load(path); ok {
+		if ce, valid := entry.(*CacheEntry); valid {
+			return ce
+		}
+	}
+	return nil
+}
+
+// SetCacheEntry stores a cache entry for a file path.
+func (d *Detector) SetCacheEntry(path string, entry *CacheEntry) {
+	if !d.config.EnableCache {
+		return
+	}
+	d.cache.Store(path, entry)
+}
+
+// IsCacheValid checks if a cache entry is still valid for the given file.
+func (d *Detector) IsCacheValid(path string, entry *CacheEntry) bool {
+	if entry == nil {
+		return false
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	// Cache is valid if file modification time and size match.
+	return info.ModTime().Equal(entry.ModTime) && info.Size() == entry.Size
+}
+
+// ClearCache clears all cached entries.
+func (d *Detector) ClearCache() {
+	d.cache.Range(func(key, _ interface{}) bool {
+		d.cache.Delete(key)
+		return true
+	})
+}
+
+// CacheSize returns the number of entries in the cache.
+func (d *Detector) CacheSize() int {
+	count := 0
+	d.cache.Range(func(_, _ interface{}) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+// DetectWithCache detects ML frameworks and model files, using cache when possible.
+func (d *Detector) DetectWithCache(ctx context.Context, rootPath string) (*DetectionResult, error) {
+	if rootPath == "" {
+		return nil, ErrEmptyPath
+	}
+
+	absPath, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path: %w", err)
+	}
+
+	result := &DetectionResult{
+		Frameworks: make([]DetectedFramework, 0),
+		Models:     make([]DetectedModel, 0),
+		Errors:     make([]string, 0),
+	}
+
+	d.filesScanned = 0
+
+	walkErr := d.walkDirectory(ctx, absPath, func(path string, isDir bool, size int64) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if isDir {
+			// Check for TensorFlow SavedModel.
+			if filepath.Base(path) == "saved_model.pb" {
+				result.Models = append(result.Models, DetectedModel{
+					Path:      filepath.Dir(path),
+					Name:      "saved_model",
+					Type:      ModelTypeSavedModel,
+					Framework: FrameworkTensorFlow,
+				})
+			}
+			return nil
+		}
+
+		ext := strings.ToLower(filepath.Ext(path))
+
+		// Check for model files.
+		if modelType, ok := d.modelExtensions[ext]; ok {
+			info, statErr := os.Stat(path)
+			if statErr == nil {
+				result.Models = append(result.Models, DetectedModel{
+					Path:      path,
+					Name:      filepath.Base(path),
+					Type:      modelType,
+					Framework: d.inferFramework(modelType),
+					SizeBytes: info.Size(),
+					Metadata:  d.extractMetadata(path, modelType),
+				})
+			}
+		}
+
+		// Check for Python files using cache.
+		if ext == ".py" || ext == ".pyx" || ext == ".pyw" || ext == ".ipynb" {
+			// Try to use cache.
+			if d.config.EnableCache {
+				if cached := d.GetCacheEntry(path); cached != nil && d.IsCacheValid(path, cached) {
+					result.Frameworks = append(result.Frameworks, cached.Frameworks...)
+					return nil
+				}
+			}
+
+			var content string
+			var readErr error
+
+			if ext == ".ipynb" {
+				content, readErr = d.parseNotebook(path)
+			} else {
+				var data []byte
+				data, readErr = d.readFile(path)
+				content = string(data)
+			}
+
+			if readErr != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("read %s: %v", path, readErr))
+				return nil
+			}
+
+			detectedFrameworks := make([]DetectedFramework, 0)
+			for framework, pattern := range d.frameworkPatterns {
+				matches := pattern.FindAllString(content, -1)
+				if len(matches) > 0 {
+					detected := DetectedFramework{
+						Name:         framework,
+						SourceFile:   path,
+						Imports:      d.uniqueStrings(matches),
+						Confidence:   d.calculateConfidence(content, framework),
+						IsMLPipeline: d.isMLPipeline(content),
+					}
+					detectedFrameworks = append(detectedFrameworks, detected)
+				}
+			}
+
+			result.Frameworks = append(result.Frameworks, detectedFrameworks...)
+
+			// Cache the result.
+			if d.config.EnableCache && len(detectedFrameworks) > 0 {
+				info, statErr := os.Stat(path)
+				if statErr == nil {
+					d.SetCacheEntry(path, &CacheEntry{
+						Frameworks: detectedFrameworks,
+						ModTime:    info.ModTime(),
+						Size:       info.Size(),
+					})
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if walkErr != nil && walkErr != context.Canceled {
+		result.Errors = append(result.Errors, walkErr.Error())
+	}
+
+	return result, nil
 }

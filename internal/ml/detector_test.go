@@ -1454,3 +1454,210 @@ func FuzzIsMLPipeline(f *testing.F) {
 		_ = d.isMLPipeline(content)
 	})
 }
+
+func TestCacheEntry(t *testing.T) {
+	d := NewDetector()
+
+	// Cache should be enabled by default.
+	if !d.config.EnableCache {
+		t.Error("expected cache to be enabled by default")
+	}
+
+	// Initially cache should be empty.
+	if d.CacheSize() != 0 {
+		t.Errorf("expected cache size 0, got %d", d.CacheSize())
+	}
+}
+
+func TestGetCacheEntryNotFound(t *testing.T) {
+	d := NewDetector()
+
+	entry := d.GetCacheEntry("/nonexistent/path.py")
+	if entry != nil {
+		t.Error("expected nil for nonexistent cache entry")
+	}
+}
+
+func TestSetAndGetCacheEntry(t *testing.T) {
+	d := NewDetector()
+
+	entry := &CacheEntry{
+		Frameworks: []DetectedFramework{
+			{Name: FrameworkTensorFlow, SourceFile: "test.py"},
+		},
+		Size: 1024,
+	}
+
+	d.SetCacheEntry("/test/path.py", entry)
+
+	retrieved := d.GetCacheEntry("/test/path.py")
+	if retrieved == nil {
+		t.Fatal("expected cache entry, got nil")
+	}
+
+	if len(retrieved.Frameworks) != 1 {
+		t.Errorf("expected 1 framework, got %d", len(retrieved.Frameworks))
+	}
+
+	if retrieved.Size != 1024 {
+		t.Errorf("expected size 1024, got %d", retrieved.Size)
+	}
+}
+
+func TestCacheDisabled(t *testing.T) {
+	config := DefaultDetectorConfig()
+	config.EnableCache = false
+	d := NewDetectorWithConfig(config)
+
+	entry := &CacheEntry{
+		Frameworks: []DetectedFramework{
+			{Name: FrameworkPyTorch, SourceFile: "model.py"},
+		},
+		Size: 2048,
+	}
+
+	// Should not store when cache is disabled.
+	d.SetCacheEntry("/test/path.py", entry)
+
+	// Should return nil when cache is disabled.
+	retrieved := d.GetCacheEntry("/test/path.py")
+	if retrieved != nil {
+		t.Error("expected nil when cache is disabled")
+	}
+}
+
+func TestClearCache(t *testing.T) {
+	d := NewDetector()
+
+	// Add some entries.
+	d.SetCacheEntry("/path1.py", &CacheEntry{Size: 100})
+	d.SetCacheEntry("/path2.py", &CacheEntry{Size: 200})
+	d.SetCacheEntry("/path3.py", &CacheEntry{Size: 300})
+
+	if d.CacheSize() != 3 {
+		t.Errorf("expected cache size 3, got %d", d.CacheSize())
+	}
+
+	d.ClearCache()
+
+	if d.CacheSize() != 0 {
+		t.Errorf("expected cache size 0 after clear, got %d", d.CacheSize())
+	}
+}
+
+func TestIsCacheValid(t *testing.T) {
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	content := []byte("import tensorflow as tf")
+	if writeErr := sp.WriteFile("test.py", content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	filePath := filepath.Join(tmpDir, "test.py")
+	d := NewDetector()
+
+	// Create a cache entry with correct mod time and size.
+	info, _ := sp.Stat("test.py")
+	entry := &CacheEntry{
+		ModTime: info.ModTime(),
+		Size:    info.Size(),
+	}
+
+	if !d.IsCacheValid(filePath, entry) {
+		t.Error("expected cache to be valid")
+	}
+
+	// Nil entry should be invalid.
+	if d.IsCacheValid(filePath, nil) {
+		t.Error("expected nil entry to be invalid")
+	}
+
+	// Entry with wrong size should be invalid.
+	wrongSizeEntry := &CacheEntry{
+		ModTime: info.ModTime(),
+		Size:    999999,
+	}
+	if d.IsCacheValid(filePath, wrongSizeEntry) {
+		t.Error("expected entry with wrong size to be invalid")
+	}
+
+	// Nonexistent file should be invalid.
+	if d.IsCacheValid("/nonexistent/file.py", entry) {
+		t.Error("expected nonexistent file to be invalid")
+	}
+}
+
+func TestDetectWithCache(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	content := []byte("import torch\nmodel = torch.nn.Linear(10, 5)")
+	if writeErr := sp.WriteFile("model.py", content, 0o600); writeErr != nil {
+		t.Fatalf("write file: %v", writeErr)
+	}
+
+	d := NewDetector()
+
+	// First detection should populate cache.
+	result1, err := d.DetectWithCache(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("DetectWithCache failed: %v", err)
+	}
+
+	if len(result1.Frameworks) != 1 {
+		t.Errorf("expected 1 framework, got %d", len(result1.Frameworks))
+	}
+
+	// Cache should have an entry.
+	if d.CacheSize() == 0 {
+		t.Error("expected cache to have entries after detection")
+	}
+
+	// Second detection should use cache.
+	result2, err := d.DetectWithCache(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("DetectWithCache failed: %v", err)
+	}
+
+	if len(result2.Frameworks) != 1 {
+		t.Errorf("expected 1 framework from cache, got %d", len(result2.Frameworks))
+	}
+}
+
+func TestDetectWithCacheEmptyPath(t *testing.T) {
+	ctx := context.Background()
+	d := NewDetector()
+
+	_, err := d.DetectWithCache(ctx, "")
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
+func BenchmarkDetectWithCache(b *testing.B) {
+	tmpDir := b.TempDir()
+	sp, _ := safepath.New(tmpDir)
+
+	// Create test files.
+	for i := 0; i < 10; i++ {
+		content := []byte("import tensorflow as tf\nmodel = tf.keras.Sequential()")
+		_ = sp.WriteFile("file"+string(rune('0'+i))+".py", content, 0o600)
+	}
+
+	ctx := context.Background()
+	d := NewDetector()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = d.DetectWithCache(ctx, tmpDir)
+	}
+}
