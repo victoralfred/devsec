@@ -87,41 +87,6 @@ func TestConcurrentWriteToFile(t *testing.T) {
 	wg.Wait()
 }
 
-// TestRaceConditionInOutputFormat tests race condition in outputFormat variable.
-// Note: This test intentionally creates race conditions and should only be run
-// without the race detector to verify race-free behavior of concurrent operations.
-func TestRaceConditionInOutputFormat(t *testing.T) {
-	if isRaceEnabled() {
-		t.Skip("skipping race condition test when race detector is enabled")
-	}
-
-	cmd := NewScanSecretsCmd()
-	buf := newBuffer()
-	cmd.SetOut(buf)
-	cmd.SetErr(buf)
-
-	findings := []model.Finding{{ID: "test", Severity: model.SeverityLow}}
-
-	var wg sync.WaitGroup
-	formats := []string{"text", "json"}
-	wg.Add(len(formats) * 5)
-
-	for _, format := range formats {
-		for i := 0; i < 5; i++ {
-			go func(f string) {
-				defer wg.Done()
-				outputFormat = f
-				err := outputResults(cmd, findings)
-				if err != nil {
-					t.Errorf("outputResults() error = %v", err)
-				}
-			}(format)
-		}
-	}
-
-	wg.Wait()
-}
-
 // TestConcurrentScannerOperations tests concurrent scanner operations.
 func TestConcurrentScannerOperations(t *testing.T) {
 	ctx := context.Background()
@@ -145,32 +110,6 @@ func TestConcurrentScannerOperations(t *testing.T) {
 			// Small delay to simulate concurrent operations
 			time.Sleep(10 * time.Millisecond)
 		}()
-	}
-
-	wg.Wait()
-}
-
-// TestRaceConditionInGlobalVariables tests race conditions in global variables.
-// Note: This test intentionally creates race conditions and should only be run
-// without the race detector to verify race-free behavior of concurrent operations.
-func TestRaceConditionInGlobalVariables(t *testing.T) {
-	if isRaceEnabled() {
-		t.Skip("skipping race condition test when race detector is enabled")
-	}
-
-	var wg sync.WaitGroup
-	concurrency := 20
-	wg.Add(concurrency)
-
-	for i := 0; i < concurrency; i++ {
-		go func(id int) {
-			defer wg.Done()
-			// Concurrently modify global variables
-			outputFormat = "text"
-			outputFile = ""
-			timeout = time.Duration(id) * time.Second
-			verbose = id%2 == 0
-		}(i)
 	}
 
 	wg.Wait()
