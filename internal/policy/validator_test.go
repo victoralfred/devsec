@@ -273,9 +273,9 @@ func TestValidatePolicyLargeFile(t *testing.T) {
 
 func TestParseAstErrors(t *testing.T) {
 	// Test that parseAstErrors handles different error types
-	tests := []struct { //nolint:govet // test struct field alignment not critical
-		name string
+	tests := []struct {
 		err  error
+		name string
 	}{
 		{name: "nil error", err: nil},
 		{name: "generic error", err: &testError{msg: "test error"}},

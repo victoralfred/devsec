@@ -23,6 +23,10 @@ const (
 	FormatSPDX Format = "spdx"
 	// FormatCycloneDX represents CycloneDX format.
 	FormatCycloneDX Format = "cyclonedx"
+	// MaxSBOMFileSize is the maximum size for dependency files (10MB).
+	MaxSBOMFileSize = 10 * 1024 * 1024
+	// MaxComponents is the maximum number of components to prevent DoS.
+	MaxComponents = 50000
 )
 
 // Component represents a software component in the SBOM.
@@ -88,6 +92,14 @@ func (g *Generator) Generate(ctx context.Context, path string, format Format) (*
 		return nil, ctx.Err()
 	}
 
+	// Validate path
+	if path == "" {
+		return nil, fmt.Errorf("path cannot be empty")
+	}
+	if strings.Contains(path, "..") {
+		return nil, fmt.Errorf("path contains invalid characters: %s", path)
+	}
+
 	components, err := g.scanComponents(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("scan components: %w", err)
@@ -119,23 +131,32 @@ func (g *Generator) scanComponents(ctx context.Context, path string) ([]Componen
 		return nil, ctx.Err()
 	}
 
-	components := make([]Component, 0)
+	components := make([]Component, 0, 100) // Pre-allocate with capacity
 
 	// Scan Go modules
 	goComponents, err := g.scanGoMod(ctx, path)
 	if err == nil {
+		if len(components)+len(goComponents) > MaxComponents {
+			return nil, fmt.Errorf("component limit exceeded: %d (max %d)", len(components)+len(goComponents), MaxComponents)
+		}
 		components = append(components, goComponents...)
 	}
 
 	// Scan Node.js packages
 	nodeComponents, err := g.scanPackageJSON(ctx, path)
 	if err == nil {
+		if len(components)+len(nodeComponents) > MaxComponents {
+			return nil, fmt.Errorf("component limit exceeded: %d (max %d)", len(components)+len(nodeComponents), MaxComponents)
+		}
 		components = append(components, nodeComponents...)
 	}
 
 	// Scan Python requirements
 	pyComponents, err := g.scanRequirements(ctx, path)
 	if err == nil {
+		if len(components)+len(pyComponents) > MaxComponents {
+			return nil, fmt.Errorf("component limit exceeded: %d (max %d)", len(components)+len(pyComponents), MaxComponents)
+		}
 		components = append(components, pyComponents...)
 	}
 
@@ -151,6 +172,15 @@ func (g *Generator) scanGoMod(ctx context.Context, path string) ([]Component, er
 	sp, err := safepath.New(path)
 	if err != nil {
 		return nil, err
+	}
+
+	// Check file size
+	info, statErr := sp.Stat("go.mod")
+	if statErr != nil {
+		return nil, statErr
+	}
+	if info.Size() > MaxSBOMFileSize {
+		return nil, fmt.Errorf("go.mod file too large: %d bytes (max %d)", info.Size(), MaxSBOMFileSize)
 	}
 
 	content, err := sp.ReadFile("go.mod")
@@ -189,10 +219,16 @@ func parseGoMod(content []byte) ([]Component, error) {
 			if len(parts) >= 2 {
 				name := parts[0]
 				if strings.HasPrefix(name, "require") {
+					if len(parts) < 2 {
+						continue // Skip malformed line
+					}
 					name = parts[1]
 					if len(parts) >= 3 {
 						parts[1] = parts[2]
 					}
+				}
+				if len(parts) < 2 {
+					continue // Skip if not enough parts after processing
 				}
 				version := strings.TrimPrefix(parts[1], "v")
 
@@ -221,6 +257,15 @@ func (g *Generator) scanPackageJSON(ctx context.Context, path string) ([]Compone
 		return nil, err
 	}
 
+	// Check file size before reading
+	info, statErr := sp.Stat("package.json")
+	if statErr != nil {
+		return nil, statErr
+	}
+	if info.Size() > MaxSBOMFileSize {
+		return nil, fmt.Errorf("package.json file too large: %d bytes (max %d)", info.Size(), MaxSBOMFileSize)
+	}
+
 	content, err := sp.ReadFile("package.json")
 	if err != nil {
 		return nil, err
@@ -240,7 +285,7 @@ func parsePackageJSON(content []byte) ([]Component, error) {
 		return nil, err
 	}
 
-	components := make([]Component, 0)
+	components := make([]Component, 0, len(pkg.Dependencies)+len(pkg.DevDependencies))
 
 	for name, version := range pkg.Dependencies {
 		version = cleanVersion(version)
@@ -276,6 +321,15 @@ func (g *Generator) scanRequirements(ctx context.Context, path string) ([]Compon
 	sp, err := safepath.New(path)
 	if err != nil {
 		return nil, err
+	}
+
+	// Check file size before reading
+	info, statErr := sp.Stat("requirements.txt")
+	if statErr != nil {
+		return nil, statErr
+	}
+	if info.Size() > MaxSBOMFileSize {
+		return nil, fmt.Errorf("requirements.txt file too large: %d bytes (max %d)", info.Size(), MaxSBOMFileSize)
 	}
 
 	content, err := sp.ReadFile("requirements.txt")

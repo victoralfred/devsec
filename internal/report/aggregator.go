@@ -5,11 +5,21 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/victoralfred/devsec/internal/model"
+)
+
+const (
+	// MaxFindings is the maximum number of findings allowed to prevent memory exhaustion.
+	MaxFindings = 100000
+	// MaxScannerNameLength is the maximum length for scanner names.
+	MaxScannerNameLength = 256
 )
 
 // Aggregator combines findings from multiple scanners.
@@ -17,6 +27,7 @@ import (
 type Aggregator struct {
 	scannerResults map[string]ScannerResult
 	findings       []model.Finding
+	mu             sync.RWMutex
 	dedupeEnabled  bool
 }
 
@@ -55,7 +66,24 @@ func New(opts ...AggregatorOption) *Aggregator {
 }
 
 // AddFindings adds findings from a scanner to the aggregator.
-func (a *Aggregator) AddFindings(scanner string, findings []model.Finding) {
+func (a *Aggregator) AddFindings(scanner string, findings []model.Finding) error {
+	// Validate scanner name
+	if scanner == "" {
+		return fmt.Errorf("scanner name cannot be empty")
+	}
+	if len(scanner) > MaxScannerNameLength {
+		return fmt.Errorf("scanner name too long: %d characters (max %d)", len(scanner), MaxScannerNameLength)
+	}
+
+	// Validate findings count
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	newCount := len(a.findings) + len(findings)
+	if newCount > MaxFindings {
+		return fmt.Errorf("findings limit exceeded: %d (max %d)", newCount, MaxFindings)
+	}
+
 	result := ScannerResult{
 		Scanner:   scanner,
 		Findings:  findings,
@@ -63,12 +91,31 @@ func (a *Aggregator) AddFindings(scanner string, findings []model.Finding) {
 	}
 	a.scannerResults[scanner] = result
 	a.findings = append(a.findings, findings...)
+	return nil
 }
 
 // AddResult adds a complete scanner result to the aggregator.
-func (a *Aggregator) AddResult(result ScannerResult) {
+func (a *Aggregator) AddResult(result ScannerResult) error {
+	// Validate scanner name
+	if result.Scanner == "" {
+		return fmt.Errorf("scanner name cannot be empty")
+	}
+	if len(result.Scanner) > MaxScannerNameLength {
+		return fmt.Errorf("scanner name too long: %d characters (max %d)", len(result.Scanner), MaxScannerNameLength)
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Validate findings count
+	newCount := len(a.findings) + len(result.Findings)
+	if newCount > MaxFindings {
+		return fmt.Errorf("findings limit exceeded: %d (max %d)", newCount, MaxFindings)
+	}
+
 	a.scannerResults[result.Scanner] = result
 	a.findings = append(a.findings, result.Findings...)
+	return nil
 }
 
 // Aggregate returns the aggregated report.
@@ -77,8 +124,17 @@ func (a *Aggregator) Aggregate(ctx context.Context) (*model.Report, error) {
 		return nil, ctx.Err()
 	}
 
-	findings := a.findings
-	if a.dedupeEnabled {
+	a.mu.RLock()
+	findings := make([]model.Finding, len(a.findings))
+	copy(findings, a.findings)
+	dedupeEnabled := a.dedupeEnabled
+	scannerResults := make(map[string]ScannerResult, len(a.scannerResults))
+	for k, v := range a.scannerResults {
+		scannerResults[k] = v
+	}
+	a.mu.RUnlock()
+
+	if dedupeEnabled {
 		findings = a.deduplicate(findings)
 	}
 
@@ -92,7 +148,7 @@ func (a *Aggregator) Aggregate(ctx context.Context) (*model.Report, error) {
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Findings:  findings,
 		Summary:   calculateSummary(findings),
-		Metadata:  a.buildMetadata(),
+		Metadata:  a.buildMetadata(scannerResults),
 	}
 
 	return report, nil
@@ -116,11 +172,14 @@ func (a *Aggregator) deduplicate(findings []model.Finding) []model.Finding {
 
 // generateFindingKey creates a unique key for deduplication.
 func generateFindingKey(f *model.Finding) string {
+	if f == nil {
+		return ""
+	}
 	data := strings.Join([]string{
 		f.Location.File,
 		f.Rule,
-		string(rune(f.Location.StartLine)),
-		string(rune(f.Location.EndLine)),
+		strconv.Itoa(f.Location.StartLine),
+		strconv.Itoa(f.Location.EndLine),
 	}, "|")
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:8])
@@ -212,26 +271,35 @@ func calculateSummary(findings []model.Finding) model.Summary {
 }
 
 // buildMetadata creates metadata for the report.
-func (a *Aggregator) buildMetadata() map[string]string {
-	metadata := make(map[string]string)
+func (a *Aggregator) buildMetadata(scannerResults map[string]ScannerResult) map[string]string {
+	metadata := make(map[string]string, 2)
 
-	scanners := make([]string, 0, len(a.scannerResults))
-	for scanner := range a.scannerResults {
+	scanners := make([]string, 0, len(scannerResults))
+	for scanner := range scannerResults {
 		scanners = append(scanners, scanner)
 	}
 	sort.Strings(scanners)
 	metadata["scanners"] = strings.Join(scanners, ",")
-	metadata["scanner_count"] = string(rune('0' + len(scanners)))
+	metadata["scanner_count"] = strconv.Itoa(len(scanners))
 
 	return metadata
 }
 
 // GetScannerResults returns results for all scanners.
 func (a *Aggregator) GetScannerResults() map[string]ScannerResult {
-	return a.scannerResults
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	result := make(map[string]ScannerResult, len(a.scannerResults))
+	for k, v := range a.scannerResults {
+		result[k] = v
+	}
+	return result
 }
 
 // FindingCount returns the total number of findings before deduplication.
 func (a *Aggregator) FindingCount() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return len(a.findings)
 }

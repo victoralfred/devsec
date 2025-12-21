@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/open-policy-agent/opa/v1/ast"
@@ -24,6 +25,7 @@ const MaxPolicySize = 1 * 1024 * 1024
 type Engine struct {
 	policies     map[string]*compiledPolicy
 	defaultQuery string
+	mu           sync.RWMutex
 }
 
 // compiledPolicy holds a compiled OPA policy.
@@ -62,6 +64,11 @@ func New(opts ...Option) *Engine {
 func (e *Engine) LoadPolicy(ctx context.Context, policyPath string) error {
 	if policyPath == "" {
 		return fmt.Errorf("policy path cannot be empty")
+	}
+
+	// Validate path to prevent path traversal
+	if strings.Contains(policyPath, "..") {
+		return fmt.Errorf("policy path contains invalid characters: %s", policyPath)
 	}
 
 	absPath, err := filepath.Abs(policyPath)
@@ -131,12 +138,14 @@ func (e *Engine) loadPolicyFromContent(ctx context.Context, path, content string
 	// Extract policy name from module package.
 	name := extractPolicyName(module)
 
+	e.mu.Lock()
 	e.policies[path] = &compiledPolicy{
 		name:     name,
 		path:     path,
 		query:    query,
 		compiler: compiler,
 	}
+	e.mu.Unlock()
 
 	return nil
 }
@@ -148,13 +157,23 @@ func (e *Engine) LoadPolicyFromString(ctx context.Context, name, content string)
 
 // Evaluate evaluates all loaded policies against the given findings.
 func (e *Engine) Evaluate(ctx context.Context, findings []model.Finding) ([]EvaluationResult, error) {
-	if len(e.policies) == 0 {
+	e.mu.RLock()
+	policyCount := len(e.policies)
+	if policyCount == 0 {
+		e.mu.RUnlock()
 		return nil, fmt.Errorf("no policies loaded")
 	}
 
-	results := make([]EvaluationResult, 0, len(e.policies))
+	// Copy policies for safe iteration
+	policies := make([]*compiledPolicy, 0, policyCount)
+	for _, p := range e.policies {
+		policies = append(policies, p)
+	}
+	e.mu.RUnlock()
 
-	for _, policy := range e.policies {
+	results := make([]EvaluationResult, 0, policyCount)
+
+	for _, policy := range policies {
 		// Check for context cancellation.
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, fmt.Errorf("context canceled: %w", ctxErr)
@@ -173,7 +192,9 @@ func (e *Engine) Evaluate(ctx context.Context, findings []model.Finding) ([]Eval
 
 // EvaluateSingle evaluates a specific policy by path.
 func (e *Engine) EvaluateSingle(ctx context.Context, policyPath string, findings []model.Finding) (EvaluationResult, error) {
+	e.mu.RLock()
 	policy, ok := e.policies[policyPath]
+	e.mu.RUnlock()
 	if !ok {
 		return EvaluationResult{}, fmt.Errorf("policy not found: %s", policyPath)
 	}
@@ -298,8 +319,10 @@ func extractPolicyName(module *ast.Module) string {
 
 // ListPolicies returns information about all loaded policies.
 func (e *Engine) ListPolicies() []Info {
-	infos := make([]Info, 0, len(e.policies))
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 
+	infos := make([]Info, 0, len(e.policies))
 	for _, p := range e.policies {
 		info := Info{
 			Name: p.name,
@@ -313,6 +336,8 @@ func (e *Engine) ListPolicies() []Info {
 
 // PolicyCount returns the number of loaded policies.
 func (e *Engine) PolicyCount() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return len(e.policies)
 }
 

@@ -271,7 +271,12 @@ func (f *MarkdownFormatter) Format(ctx context.Context, report *model.Report) ([
 		return nil, ctx.Err()
 	}
 
+	if report == nil {
+		return nil, fmt.Errorf("report cannot be nil")
+	}
+
 	var sb strings.Builder
+	sb.Grow(4096) // Pre-allocate capacity for better performance
 
 	// Header
 	sb.WriteString("# Security Scan Report\n\n")
