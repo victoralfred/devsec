@@ -422,6 +422,10 @@ func (s *Scanner) queryBatch(ctx context.Context, deps []Dependency) ([]model.Fi
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
+		// Check if error is due to context cancellation
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("context canceled: %w", ctxErr)
+		}
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	defer func() {
@@ -429,7 +433,9 @@ func (s *Scanner) queryBatch(ctx context.Context, deps []Dependency) ([]model.Fi
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+		// Read error body for better error messages (limit to 1KB)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Limit response size.
@@ -446,7 +452,15 @@ func (s *Scanner) queryBatch(ctx context.Context, deps []Dependency) ([]model.Fi
 
 // mapBatchResults maps batch API results to findings.
 func (s *Scanner) mapBatchResults(resp BatchQueryResponse, deps []Dependency) []model.Finding {
-	var findings []model.Finding
+	// Pre-allocate with estimated capacity for better performance
+	totalVulns := 0
+	for i := range resp.Results {
+		if i < len(deps) {
+			totalVulns += len(resp.Results[i].Vulns)
+		}
+	}
+
+	findings := make([]model.Finding, 0, totalVulns)
 
 	for i, result := range resp.Results {
 		if i >= len(deps) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -282,7 +283,9 @@ func (s *Scanner) mapVulnerability(vuln *Vulnerability, target string) model.Fin
 		Description: description,
 		Severity:    severity,
 		Location: model.Location{
-			File: target,
+			File:      target,
+			StartLine: 1, // Trivy doesn't provide line numbers, default to 1
+			EndLine:   1,
 		},
 	}
 }
@@ -313,14 +316,27 @@ func (s *Scanner) mapSeverity(severity string) model.Severity {
 
 // buildDescription builds a detailed description from vulnerability data.
 func (s *Scanner) buildDescription(vuln *Vulnerability) string {
-	desc := vuln.Description
+	var builder strings.Builder
+	builder.Grow(300) // Pre-allocate estimated capacity
 
 	if vuln.PkgName != "" {
-		desc = fmt.Sprintf("Package: %s\nInstalled: %s\nFixed: %s\n\n%s",
-			vuln.PkgName, vuln.InstalledVersion, vuln.FixedVersion, desc)
+		builder.WriteString("Package: ")
+		builder.WriteString(vuln.PkgName)
+		builder.WriteString("\nInstalled: ")
+		builder.WriteString(vuln.InstalledVersion)
+		if vuln.FixedVersion != "" {
+			builder.WriteString("\nFixed: ")
+			builder.WriteString(vuln.FixedVersion)
+		}
+		if vuln.Description != "" {
+			builder.WriteString("\n\n")
+			builder.WriteString(vuln.Description)
+		}
+	} else if vuln.Description != "" {
+		builder.WriteString(vuln.Description)
 	}
 
-	return desc
+	return builder.String()
 }
 
 // Close shuts down the scanner and releases resources.
