@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -40,6 +39,16 @@ const (
 	FrameworkLightGBM Framework = "lightgbm"
 	// FrameworkUnknown represents an unknown framework.
 	FrameworkUnknown Framework = "unknown"
+)
+
+// Resource limits to prevent DoS and memory exhaustion.
+const (
+	// MaxCacheEntries is the maximum number of cache entries to prevent unbounded growth.
+	MaxCacheEntries = 10000
+	// MaxFrameworks is the maximum number of frameworks that can be detected.
+	MaxFrameworks = 1000
+	// MaxModels is the maximum number of models that can be detected.
+	MaxModels = 5000
 )
 
 // ModelType represents the type of ML model file.
@@ -165,6 +174,7 @@ type Detector struct {
 	modelExtensions    map[string]ModelType
 	config             DetectorConfig
 	filesScanned       int
+	filesScannedMu     sync.RWMutex // Protects filesScanned from race conditions
 }
 
 // NewDetector creates a new ML detector with default configuration.
@@ -283,7 +293,9 @@ func (d *Detector) Detect(ctx context.Context, rootPath string) (*DetectionResul
 	}
 
 	// Reset file counter for each scan.
+	d.filesScannedMu.Lock()
 	d.filesScanned = 0
+	d.filesScannedMu.Unlock()
 
 	result := &DetectionResult{
 		Frameworks: make([]DetectedFramework, 0),
@@ -371,7 +383,17 @@ func (d *Detector) scanForFrameworks(ctx context.Context, rootPath string, resul
 
 // detectFrameworksInContent detects ML frameworks in file content.
 func (d *Detector) detectFrameworksInContent(content, filePath string, result *DetectionResult) {
+	// Check limit to prevent DoS.
+	if len(result.Frameworks) >= MaxFrameworks {
+		return
+	}
+
 	for framework, pattern := range d.frameworkPatterns {
+		// Check limit in loop to prevent exceeding.
+		if len(result.Frameworks) >= MaxFrameworks {
+			break
+		}
+
 		matches := pattern.FindAllString(content, -1)
 		if len(matches) > 0 {
 			detected := DetectedFramework{
@@ -438,6 +460,11 @@ func (d *Detector) detectFrameworksInNotebookResult(nbResult *NotebookParseResul
 // detectFrameworksInNotebook detects frameworks with cell tracking for notebooks.
 func (d *Detector) detectFrameworksInNotebook(nbResult *NotebookParseResult, filePath string, result *DetectionResult) {
 	frameworks := d.detectFrameworksInNotebookResult(nbResult, filePath)
+	// Check limit to prevent DoS.
+	remaining := MaxFrameworks - len(result.Frameworks)
+	if remaining > 0 && len(frameworks) > remaining {
+		frameworks = frameworks[:remaining]
+	}
 	result.Frameworks = append(result.Frameworks, frameworks...)
 }
 
@@ -502,6 +529,11 @@ func (d *Detector) scanForModels(ctx context.Context, rootPath string, result *D
 		ext := strings.ToLower(filepath.Ext(path))
 		modelType, isModel := d.modelExtensions[ext]
 		if !isModel {
+			return nil
+		}
+
+		// Check limit to prevent DoS.
+		if len(result.Models) >= MaxModels {
 			return nil
 		}
 
@@ -1186,7 +1218,10 @@ func (d *Detector) walkRecursive(ctx context.Context, sp *safepath.SafePath, roo
 	}
 
 	// Check file count limit - stop scanning but don't fail.
-	if d.config.MaxFilesToScan > 0 && d.filesScanned >= d.config.MaxFilesToScan {
+	d.filesScannedMu.RLock()
+	filesScanned := d.filesScanned
+	d.filesScannedMu.RUnlock()
+	if d.config.MaxFilesToScan > 0 && filesScanned >= d.config.MaxFilesToScan {
 		return nil
 	}
 
@@ -1207,7 +1242,10 @@ func (d *Detector) walkRecursive(ctx context.Context, sp *safepath.SafePath, roo
 		}
 
 		// Check file count limit for each iteration - stop scanning but don't fail.
-		if d.config.MaxFilesToScan > 0 && d.filesScanned >= d.config.MaxFilesToScan {
+		d.filesScannedMu.RLock()
+		filesScanned = d.filesScanned
+		d.filesScannedMu.RUnlock()
+		if d.config.MaxFilesToScan > 0 && filesScanned >= d.config.MaxFilesToScan {
 			return nil
 		}
 
@@ -1239,7 +1277,9 @@ func (d *Detector) walkRecursive(ctx context.Context, sp *safepath.SafePath, roo
 
 		// Increment file counter for non-directories.
 		if !entry.IsDir() {
+			d.filesScannedMu.Lock()
 			d.filesScanned++
+			d.filesScannedMu.Unlock()
 		}
 
 		if err := fn(fullPath, entry.IsDir(), size); err != nil {
@@ -1312,6 +1352,7 @@ func (d *Detector) parseNotebook(path string) (string, error) {
 	}
 
 	var codeBuilder strings.Builder
+	codeBuilder.Grow(4096) // Pre-allocate capacity for notebook code
 	for _, cell := range nb.Cells {
 		// Only process code cells, skip markdown, raw cells.
 		if cell.CellType != "code" {
@@ -1351,6 +1392,7 @@ func (d *Detector) parseNotebookWithContext(ctx context.Context, path string) (s
 	}
 
 	var codeBuilder strings.Builder
+	codeBuilder.Grow(4096) // Pre-allocate capacity for notebook code
 	for _, cell := range nb.Cells {
 		// Only process code cells, skip markdown, raw cells.
 		if cell.CellType != "code" {
@@ -1384,6 +1426,7 @@ func (d *Detector) parseNotebookWithCells(path string) (*NotebookParseResult, er
 	}
 
 	var codeBuilder strings.Builder
+	codeBuilder.Grow(4096) // Pre-allocate capacity for notebook code
 	codeCellIndex := 0
 
 	for _, cell := range nb.Cells {
@@ -1442,6 +1485,7 @@ func (d *Detector) parseNotebookWithCellsContext(ctx context.Context, path strin
 	}
 
 	var codeBuilder strings.Builder
+	codeBuilder.Grow(4096) // Pre-allocate capacity for notebook code
 	codeCellIndex := 0
 
 	for _, cell := range nb.Cells {
@@ -1554,6 +1598,7 @@ func (r *DetectionResult) ToJSON() ([]byte, error) {
 // Summary returns a summary of detection results.
 func (r *DetectionResult) Summary() string {
 	var sb strings.Builder
+	sb.Grow(512) // Pre-allocate capacity for better performance
 
 	sb.WriteString(fmt.Sprintf("Detected %d framework(s) and %d model file(s)\n", len(r.Frameworks), len(r.Models)))
 
@@ -1627,15 +1672,11 @@ func (d *Detector) DetectConcurrent(ctx context.Context, rootPath string) (*Dete
 	}
 
 	// Reset file counter for each scan.
+	d.filesScannedMu.Lock()
 	d.filesScanned = 0
+	d.filesScannedMu.Unlock()
 
-	// Collect all file tasks.
-	tasks := make([]fileTask, 0, 1000)
-	if err := d.collectFileTasks(ctx, rootPath, &tasks); err != nil {
-		return nil, fmt.Errorf("collect file tasks: %w", err)
-	}
-
-	// Process tasks concurrently.
+	// Process tasks concurrently using streaming approach to avoid loading all tasks into memory.
 	result := &concurrentResult{
 		frameworks: make([]DetectedFramework, 0),
 		models:     make([]DetectedModel, 0),
@@ -1647,37 +1688,12 @@ func (d *Detector) DetectConcurrent(ctx context.Context, rootPath string) (*Dete
 		workerCount = 4
 	}
 
-	d.processTasksConcurrently(ctx, tasks, result, workerCount)
+	// Use buffered channel for streaming tasks (avoids loading all into memory).
+	const taskBufferSize = 1000
+	taskChan := make(chan fileTask, taskBufferSize)
 
-	return &DetectionResult{
-		Frameworks: result.frameworks,
-		Models:     result.models,
-		Errors:     result.errors,
-	}, nil
-}
-
-// collectFileTasks collects all file tasks from the directory tree.
-func (d *Detector) collectFileTasks(ctx context.Context, rootPath string, tasks *[]fileTask) error {
-	return d.walkDirectory(ctx, rootPath, func(path string, isDir bool, size int64) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		*tasks = append(*tasks, fileTask{
-			path:  path,
-			isDir: isDir,
-			size:  size,
-		})
-		return nil
-	})
-}
-
-// processTasksConcurrently processes file tasks using a worker pool.
-func (d *Detector) processTasksConcurrently(ctx context.Context, tasks []fileTask, result *concurrentResult, workerCount int) {
-	taskChan := make(chan fileTask, len(tasks))
+	// Start workers that process tasks as they arrive.
 	var wg sync.WaitGroup
-
-	// Start workers.
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
@@ -1686,20 +1702,29 @@ func (d *Detector) processTasksConcurrently(ctx context.Context, tasks []fileTas
 		}()
 	}
 
-	// Send tasks to workers.
-	for _, task := range tasks {
+	// Stream tasks from directory walk directly to workers.
+	walkErr := d.walkDirectory(ctx, rootPath, func(path string, isDir bool, size int64) error {
 		select {
 		case <-ctx.Done():
-			close(taskChan)
-			wg.Wait()
-			return
-		case taskChan <- task:
+			return ctx.Err()
+		case taskChan <- fileTask{path: path, isDir: isDir, size: size}:
+			return nil
 		}
-	}
-	close(taskChan)
+	})
 
-	// Wait for all workers to complete.
+	// Close channel and wait for workers to finish.
+	close(taskChan)
 	wg.Wait()
+
+	if walkErr != nil && walkErr != context.Canceled {
+		result.addError(fmt.Sprintf("walk directory: %v", walkErr))
+	}
+
+	return &DetectionResult{
+		Frameworks: result.frameworks,
+		Models:     result.models,
+		Errors:     result.errors,
+	}, nil
 }
 
 // worker processes file tasks from the channel.
@@ -1714,13 +1739,19 @@ func (d *Detector) worker(ctx context.Context, tasks <-chan fileTask, result *co
 		if task.isDir {
 			// Check for TensorFlow SavedModel directory.
 			if d.isSavedModelDir(task.path) {
-				result.addModel(DetectedModel{
-					Path:      task.path,
-					Name:      filepath.Base(task.path),
-					Type:      ModelTypeSavedModel,
-					Framework: FrameworkTensorFlow,
-					SizeBytes: task.size,
-				})
+				// Check limit to prevent DoS.
+				result.mu.Lock()
+				canAdd := len(result.models) < MaxModels
+				result.mu.Unlock()
+				if canAdd {
+					result.addModel(DetectedModel{
+						Path:      task.path,
+						Name:      filepath.Base(task.path),
+						Type:      ModelTypeSavedModel,
+						Framework: FrameworkTensorFlow,
+						SizeBytes: task.size,
+					})
+				}
 			}
 			continue
 		}
@@ -1754,26 +1785,50 @@ func (d *Detector) worker(ctx context.Context, tasks <-chan fileTask, result *co
 		// Check for model files.
 		modelType, isModel := d.modelExtensions[ext]
 		if isModel {
-			model := DetectedModel{
-				Path:      task.path,
-				Name:      filepath.Base(task.path),
-				Type:      modelType,
-				Framework: d.inferFramework(modelType),
-				SizeBytes: task.size,
-			}
+			// Check limit to prevent DoS.
+			result.mu.Lock()
+			canAdd := len(result.models) < MaxModels
+			result.mu.Unlock()
+			if canAdd {
+				model := DetectedModel{
+					Path:      task.path,
+					Name:      filepath.Base(task.path),
+					Type:      modelType,
+					Framework: d.inferFramework(modelType),
+					SizeBytes: task.size,
+				}
 
-			if metadata := d.extractMetadata(task.path, modelType); metadata != nil {
-				model.Metadata = metadata
-			}
+				if metadata := d.extractMetadata(task.path, modelType); metadata != nil {
+					model.Metadata = metadata
+				}
 
-			result.addModel(model)
+				result.addModel(model)
+			}
 		}
 	}
 }
 
 // detectFrameworksInContentConcurrent detects ML frameworks and adds to concurrent result.
 func (d *Detector) detectFrameworksInContentConcurrent(content, filePath string, result *concurrentResult) {
+	result.mu.Lock()
+	currentCount := len(result.frameworks)
+	result.mu.Unlock()
+
+	// Check limit to prevent DoS.
+	if currentCount >= MaxFrameworks {
+		return
+	}
+
 	for framework, pattern := range d.frameworkPatterns {
+		result.mu.Lock()
+		currentCount = len(result.frameworks)
+		result.mu.Unlock()
+
+		// Check limit in loop to prevent exceeding.
+		if currentCount >= MaxFrameworks {
+			break
+		}
+
 		matches := pattern.FindAllString(content, -1)
 		if len(matches) > 0 {
 			detected := DetectedFramework{
@@ -1791,6 +1846,17 @@ func (d *Detector) detectFrameworksInContentConcurrent(content, filePath string,
 // detectFrameworksInNotebookConcurrent detects ML frameworks with cell tracking for concurrent result.
 func (d *Detector) detectFrameworksInNotebookConcurrent(nbResult *NotebookParseResult, filePath string, result *concurrentResult) {
 	frameworks := d.detectFrameworksInNotebookResult(nbResult, filePath)
+
+	result.mu.Lock()
+	currentCount := len(result.frameworks)
+	remaining := MaxFrameworks - currentCount
+	result.mu.Unlock()
+
+	// Check limit to prevent DoS.
+	if remaining > 0 && len(frameworks) > remaining {
+		frameworks = frameworks[:remaining]
+	}
+
 	for _, fw := range frameworks {
 		result.addFramework(fw)
 	}
@@ -1816,6 +1882,12 @@ func (d *Detector) SetCacheEntry(path string, entry *CacheEntry) {
 	if !d.config.EnableCache {
 		return
 	}
+
+	// Check cache size and evict oldest entry if needed.
+	if d.CacheSize() >= MaxCacheEntries {
+		d.evictOldestCacheEntry()
+	}
+
 	d.cache.Store(path, entry)
 }
 
@@ -1825,7 +1897,15 @@ func (d *Detector) IsCacheValid(path string, entry *CacheEntry) bool {
 		return false
 	}
 
-	info, err := os.Stat(path)
+	// Use safepath instead of os.Stat for compliance.
+	dir := filepath.Dir(path)
+	filename := filepath.Base(path)
+	sp, err := safepath.New(dir)
+	if err != nil {
+		return false
+	}
+
+	info, err := sp.Stat(filename)
 	if err != nil {
 		return false
 	}
@@ -1852,6 +1932,29 @@ func (d *Detector) CacheSize() int {
 	return count
 }
 
+// evictOldestCacheEntry removes the oldest cache entry to make room for new ones.
+// This is a simple FIFO eviction strategy.
+func (d *Detector) evictOldestCacheEntry() {
+	var oldestKey interface{}
+	var oldestTime time.Time
+	first := true
+
+	d.cache.Range(func(key, value interface{}) bool {
+		if entry, ok := value.(*CacheEntry); ok {
+			if first || entry.ModTime.Before(oldestTime) {
+				oldestKey = key
+				oldestTime = entry.ModTime
+				first = false
+			}
+		}
+		return true
+	})
+
+	if oldestKey != nil {
+		d.cache.Delete(oldestKey)
+	}
+}
+
 // DetectWithCache detects ML frameworks and model files, using cache when possible.
 func (d *Detector) DetectWithCache(ctx context.Context, rootPath string) (*DetectionResult, error) {
 	if rootPath == "" {
@@ -1869,7 +1972,9 @@ func (d *Detector) DetectWithCache(ctx context.Context, rootPath string) (*Detec
 		Errors:     make([]string, 0),
 	}
 
+	d.filesScannedMu.Lock()
 	d.filesScanned = 0
+	d.filesScannedMu.Unlock()
 
 	walkErr := d.walkDirectory(ctx, absPath, func(path string, isDir bool, size int64) error {
 		if ctx.Err() != nil {
@@ -1879,12 +1984,15 @@ func (d *Detector) DetectWithCache(ctx context.Context, rootPath string) (*Detec
 		if isDir {
 			// Check for TensorFlow SavedModel.
 			if filepath.Base(path) == "saved_model.pb" {
-				result.Models = append(result.Models, DetectedModel{
-					Path:      filepath.Dir(path),
-					Name:      "saved_model",
-					Type:      ModelTypeSavedModel,
-					Framework: FrameworkTensorFlow,
-				})
+				// Check limit to prevent DoS.
+				if len(result.Models) < MaxModels {
+					result.Models = append(result.Models, DetectedModel{
+						Path:      filepath.Dir(path),
+						Name:      "saved_model",
+						Type:      ModelTypeSavedModel,
+						Framework: FrameworkTensorFlow,
+					})
+				}
 			}
 			return nil
 		}
@@ -1893,16 +2001,27 @@ func (d *Detector) DetectWithCache(ctx context.Context, rootPath string) (*Detec
 
 		// Check for model files.
 		if modelType, ok := d.modelExtensions[ext]; ok {
-			info, statErr := os.Stat(path)
-			if statErr == nil {
-				result.Models = append(result.Models, DetectedModel{
-					Path:      path,
-					Name:      filepath.Base(path),
-					Type:      modelType,
-					Framework: d.inferFramework(modelType),
-					SizeBytes: info.Size(),
-					Metadata:  d.extractMetadata(path, modelType),
-				})
+			// Check limit to prevent DoS.
+			if len(result.Models) >= MaxModels {
+				return nil
+			}
+
+			// Use safepath instead of os.Stat for compliance.
+			dir := filepath.Dir(path)
+			filename := filepath.Base(path)
+			sp, spErr := safepath.New(dir)
+			if spErr == nil {
+				info, statErr := sp.Stat(filename)
+				if statErr == nil {
+					result.Models = append(result.Models, DetectedModel{
+						Path:      path,
+						Name:      filepath.Base(path),
+						Type:      modelType,
+						Framework: d.inferFramework(modelType),
+						SizeBytes: info.Size(),
+						Metadata:  d.extractMetadata(path, modelType),
+					})
+				}
 			}
 		}
 
@@ -1935,8 +2054,13 @@ func (d *Detector) DetectWithCache(ctx context.Context, rootPath string) (*Detec
 				}
 				content := string(data)
 
-				detectedFrameworks = make([]DetectedFramework, 0)
+				detectedFrameworks = make([]DetectedFramework, 0, 8) // Pre-allocate for common frameworks
 				for framework, pattern := range d.frameworkPatterns {
+					// Check limit to prevent DoS.
+					if len(detectedFrameworks) >= MaxFrameworks {
+						break
+					}
+
 					matches := pattern.FindAllString(content, -1)
 					if len(matches) > 0 {
 						detected := DetectedFramework{
@@ -1955,13 +2079,19 @@ func (d *Detector) DetectWithCache(ctx context.Context, rootPath string) (*Detec
 
 			// Cache the result.
 			if d.config.EnableCache && len(detectedFrameworks) > 0 {
-				info, statErr := os.Stat(path)
-				if statErr == nil {
-					d.SetCacheEntry(path, &CacheEntry{
-						Frameworks: detectedFrameworks,
-						ModTime:    info.ModTime(),
-						Size:       info.Size(),
-					})
+				// Use safepath instead of os.Stat for compliance.
+				dir := filepath.Dir(path)
+				filename := filepath.Base(path)
+				sp, spErr := safepath.New(dir)
+				if spErr == nil {
+					info, statErr := sp.Stat(filename)
+					if statErr == nil {
+						d.SetCacheEntry(path, &CacheEntry{
+							Frameworks: detectedFrameworks,
+							ModTime:    info.ModTime(),
+							Size:       info.Size(),
+						})
+					}
 				}
 			}
 		}
