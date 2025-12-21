@@ -2,6 +2,8 @@
 package ml
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -697,9 +699,116 @@ func (d *Detector) extractH5Metadata(data []byte, metadata map[string]interface{
 	if len(data) >= 8 && bytesEqual(data[:8], h5Magic) {
 		metadata["format"] = "HDF5"
 		metadata["is_valid_hdf5"] = true
+
+		// Parse HDF5 superblock for version info.
+		d.extractH5SuperblockInfo(data, metadata)
 	} else {
 		metadata["is_valid_hdf5"] = false
 	}
+}
+
+// extractH5SuperblockInfo extracts info from HDF5 superblock.
+func (d *Detector) extractH5SuperblockInfo(data []byte, metadata map[string]interface{}) {
+	if len(data) < 16 {
+		return
+	}
+
+	// After 8-byte signature, superblock starts.
+	// Byte 8: superblock version (0, 1, 2, or 3).
+	superblockVersion := int(data[8])
+	metadata["superblock_version"] = superblockVersion
+
+	// Parse based on superblock version.
+	switch superblockVersion {
+	case 0, 1:
+		// Version 0/1 superblock layout.
+		if len(data) >= 13 {
+			// Byte 9: Free-space storage version.
+			// Byte 10: Root group symbol table entry version.
+			// Byte 11: Reserved (zero).
+			// Byte 12: Shared header message format version.
+			metadata["free_space_version"] = int(data[9])
+			metadata["root_group_version"] = int(data[10])
+
+			if len(data) >= 14 {
+				// Byte 13: Size of offsets.
+				metadata["offset_size"] = int(data[13])
+			}
+			if len(data) >= 15 {
+				// Byte 14: Size of lengths.
+				metadata["length_size"] = int(data[14])
+			}
+		}
+
+	case 2, 3:
+		// Version 2/3 superblock layout (more compact).
+		if len(data) >= 10 {
+			// Byte 9: Size of offsets.
+			metadata["offset_size"] = int(data[9])
+		}
+		if len(data) >= 11 {
+			// Byte 10: Size of lengths.
+			metadata["length_size"] = int(data[10])
+		}
+	}
+
+	// Try to detect Keras model by looking for common attribute names.
+	d.detectKerasModelHints(data, metadata)
+}
+
+// detectKerasModelHints tries to identify Keras-specific content in HDF5.
+func (d *Detector) detectKerasModelHints(data []byte, metadata map[string]interface{}) {
+	// Search for common Keras strings in the file.
+	kerasHints := []string{
+		"keras_version",
+		"model_config",
+		"model_weights",
+		"optimizer_weights",
+		"training_config",
+		"backend",
+	}
+
+	foundHints := make([]string, 0)
+	dataStr := string(data)
+
+	for _, hint := range kerasHints {
+		if strings.Contains(dataStr, hint) {
+			foundHints = append(foundHints, hint)
+		}
+	}
+
+	if len(foundHints) > 0 {
+		metadata["keras_hints"] = foundHints
+		metadata["is_keras_model"] = true
+
+		// Try to extract keras version if present.
+		if idx := strings.Index(dataStr, "keras_version"); idx != -1 {
+			// Look for version string nearby (format varies).
+			searchArea := dataStr[idx:minInt(idx+100, len(dataStr))]
+			// Common version patterns.
+			for _, prefix := range []string{"2.", "3."} {
+				if vIdx := strings.Index(searchArea, prefix); vIdx != -1 {
+					// Extract version-like string.
+					end := vIdx + 1
+					for end < len(searchArea) && (searchArea[end] == '.' || (searchArea[end] >= '0' && searchArea[end] <= '9')) {
+						end++
+					}
+					if end > vIdx+2 {
+						metadata["keras_version_hint"] = searchArea[vIdx:end]
+						break
+					}
+				}
+			}
+		}
+	}
+}
+
+// minInt returns the minimum of two integers.
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // extractPyTorchMetadata extracts metadata from PyTorch model files.
@@ -712,6 +821,9 @@ func (d *Detector) extractPyTorchMetadata(data []byte, metadata map[string]inter
 	if len(data) >= 4 && data[0] == 0x50 && data[1] == 0x4b && data[2] == 0x03 && data[3] == 0x04 {
 		metadata["format"] = "PyTorch ZIP archive"
 		metadata["pytorch_version"] = ">=1.6"
+
+		// Parse ZIP to extract more details.
+		d.extractPyTorchZIPDetails(data, metadata)
 	} else if len(data) >= 2 && data[0] == 0x80 {
 		// Pickle protocol marker.
 		protocol := int(data[1])
@@ -723,6 +835,66 @@ func (d *Detector) extractPyTorchMetadata(data []byte, metadata map[string]inter
 	}
 }
 
+// extractPyTorchZIPDetails extracts detailed info from PyTorch ZIP archives.
+func (d *Detector) extractPyTorchZIPDetails(data []byte, metadata map[string]interface{}) {
+	reader := bytes.NewReader(data)
+	zipReader, err := zip.NewReader(reader, int64(len(data)))
+	if err != nil {
+		return
+	}
+
+	files := make([]string, 0, len(zipReader.File))
+	var hasDataPkl, hasVersion, hasModelPy, hasConstants bool
+	var tensorCount int
+
+	for _, f := range zipReader.File {
+		name := f.Name
+		files = append(files, name)
+
+		// Check for known PyTorch archive files.
+		baseName := filepath.Base(name)
+		switch {
+		case baseName == "data.pkl":
+			hasDataPkl = true
+		case baseName == "version":
+			hasVersion = true
+			// Try to read version.
+			if rc, openErr := f.Open(); openErr == nil {
+				versionData := make([]byte, 32)
+				n, readErr := rc.Read(versionData)
+				// Accept EOF for short version files.
+				if n > 0 && (readErr == nil || readErr.Error() == "EOF") {
+					version := strings.TrimSpace(string(versionData[:n]))
+					if version != "" {
+						metadata["pytorch_archive_version"] = version
+					}
+				}
+				_ = rc.Close()
+			}
+		case baseName == "model.py":
+			hasModelPy = true
+		case baseName == "constants.pkl":
+			hasConstants = true
+		case strings.HasSuffix(name, ".storage"):
+			tensorCount++
+		}
+	}
+
+	metadata["archive_files"] = files
+	metadata["has_data_pkl"] = hasDataPkl
+	metadata["has_version"] = hasVersion
+	metadata["has_model_py"] = hasModelPy
+	metadata["has_constants"] = hasConstants
+	metadata["tensor_storage_count"] = tensorCount
+
+	// Infer model type based on archive structure.
+	if hasModelPy {
+		metadata["model_type_hint"] = "TorchScript"
+	} else if hasDataPkl {
+		metadata["model_type_hint"] = "state_dict or full model"
+	}
+}
+
 // extractONNXMetadata extracts metadata from ONNX model files.
 func (d *Detector) extractONNXMetadata(data []byte, metadata map[string]interface{}) {
 	if len(data) < 10 {
@@ -730,17 +902,187 @@ func (d *Detector) extractONNXMetadata(data []byte, metadata map[string]interfac
 	}
 
 	// ONNX files are protobuf format.
-	// Check for protobuf wire type (field 1, type 2 = length-delimited for ir_version).
-	if data[0] == 0x08 {
-		metadata["format"] = "ONNX protobuf"
-		// Try to extract IR version (varint after field tag).
-		if len(data) > 1 {
-			irVersion := int(data[1])
-			if irVersion > 0 && irVersion < 20 {
-				metadata["ir_version"] = irVersion
+	// ModelProto fields (from onnx.proto):
+	// 1: ir_version (int64)
+	// 2: producer_name (string)
+	// 3: producer_version (string)
+	// 4: domain (string)
+	// 5: model_version (int64)
+	// 6: doc_string (string)
+	// 8: opset_import (repeated OpSetId)
+
+	metadata["format"] = "ONNX protobuf"
+
+	// Parse protobuf fields.
+	pos := 0
+	for pos < len(data) && pos < 4096 { // Limit parsing to first 4KB
+		if pos >= len(data) {
+			break
+		}
+
+		// Read field tag (varint).
+		fieldTag, n := d.readVarint(data[pos:])
+		if n == 0 {
+			break
+		}
+		pos += n
+
+		fieldNumber := fieldTag >> 3
+		wireType := fieldTag & 0x7
+
+		switch wireType {
+		case 0: // Varint
+			value, vn := d.readVarint(data[pos:])
+			if vn == 0 {
+				return
 			}
+			pos += vn
+
+			switch fieldNumber {
+			case 1:
+				metadata["ir_version"] = value
+			case 5:
+				metadata["model_version"] = value
+			}
+
+		case 2: // Length-delimited
+			length, ln := d.readVarint(data[pos:])
+			if ln == 0 {
+				return
+			}
+			pos += ln
+
+			if pos+int(length) > len(data) {
+				return
+			}
+
+			strData := data[pos : pos+int(length)]
+			pos += int(length)
+
+			switch fieldNumber {
+			case 2:
+				if isValidUTF8(strData) {
+					metadata["producer_name"] = string(strData)
+				}
+			case 3:
+				if isValidUTF8(strData) {
+					metadata["producer_version"] = string(strData)
+				}
+			case 4:
+				if isValidUTF8(strData) {
+					metadata["domain"] = string(strData)
+				}
+			case 6:
+				if isValidUTF8(strData) && len(strData) < 500 {
+					metadata["doc_string"] = string(strData)
+				}
+			case 8:
+				// opset_import - parse nested message for opset version.
+				d.parseONNXOpsetImport(strData, metadata)
+			}
+
+		default:
+			// Skip unknown wire types.
+			return
 		}
 	}
+}
+
+// parseONNXOpsetImport parses an OpSetId message from ONNX.
+func (d *Detector) parseONNXOpsetImport(data []byte, metadata map[string]interface{}) {
+	// OpSetId fields:
+	// 1: domain (string)
+	// 2: version (int64)
+
+	pos := 0
+	var domain string
+	var version int64
+
+	for pos < len(data) {
+		fieldTag, n := d.readVarint(data[pos:])
+		if n == 0 {
+			break
+		}
+		pos += n
+
+		fieldNumber := fieldTag >> 3
+		wireType := fieldTag & 0x7
+
+		switch wireType {
+		case 0: // Varint
+			value, vn := d.readVarint(data[pos:])
+			if vn == 0 {
+				return
+			}
+			pos += vn
+
+			if fieldNumber == 2 {
+				version = value
+			}
+
+		case 2: // Length-delimited
+			length, ln := d.readVarint(data[pos:])
+			if ln == 0 {
+				return
+			}
+			pos += ln
+
+			if pos+int(length) > len(data) {
+				return
+			}
+
+			if fieldNumber == 1 {
+				domain = string(data[pos : pos+int(length)])
+			}
+			pos += int(length)
+
+		default:
+			return
+		}
+	}
+
+	// Store opset info.
+	if domain == "" || domain == "ai.onnx" {
+		metadata["opset_version"] = version
+	}
+	if domain != "" && domain != "ai.onnx" {
+		if existing, ok := metadata["custom_domains"].([]string); ok {
+			metadata["custom_domains"] = append(existing, domain)
+		} else {
+			metadata["custom_domains"] = []string{domain}
+		}
+	}
+}
+
+// readVarint reads a protobuf varint from data.
+func (d *Detector) readVarint(data []byte) (value int64, bytesRead int) {
+	if len(data) == 0 {
+		return 0, 0
+	}
+
+	var result int64
+	var shift uint
+
+	for i := 0; i < len(data) && i < 10; i++ {
+		b := data[i]
+		result |= int64(b&0x7F) << shift
+		if b < 0x80 {
+			return result, i + 1
+		}
+		shift += 7
+	}
+
+	return 0, 0
+}
+
+// isValidUTF8 checks if data is valid UTF-8 and printable.
+func isValidUTF8(data []byte) bool {
+	for _, b := range data {
+		if b < 0x20 && b != '\n' && b != '\r' && b != '\t' {
+			return false
+		}
+	}
+	return true
 }
 
 // extractPickleMetadata extracts metadata from pickle files.

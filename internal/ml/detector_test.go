@@ -1,6 +1,8 @@
 package ml
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"path/filepath"
 	"testing"
@@ -1315,7 +1317,7 @@ func TestExtractONNXMetadata(t *testing.T) {
 	if metadata["format"] != "ONNX protobuf" {
 		t.Errorf("expected format 'ONNX protobuf', got %v", metadata["format"])
 	}
-	if metadata["ir_version"] != 7 {
+	if metadata["ir_version"] != int64(7) {
 		t.Errorf("expected ir_version 7, got %v", metadata["ir_version"])
 	}
 }
@@ -1422,6 +1424,343 @@ func TestExtractMetadataFileSize(t *testing.T) {
 
 	if metadata["file_size"] != 1024 {
 		t.Errorf("expected file_size 1024, got %v", metadata["file_size"])
+	}
+}
+
+func TestExtractPyTorchZIPDetailsWithVersion(t *testing.T) {
+	d := NewDetector()
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a valid PyTorch ZIP archive with version file and data.pkl.
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	// Add version file.
+	versionFile, err := w.Create("archive/version")
+	if err != nil {
+		t.Fatalf("create version file: %v", err)
+	}
+	if _, writeErr := versionFile.Write([]byte("3")); writeErr != nil {
+		t.Fatalf("write version: %v", writeErr)
+	}
+
+	// Add data.pkl file.
+	dataPkl, err := w.Create("archive/data.pkl")
+	if err != nil {
+		t.Fatalf("create data.pkl: %v", err)
+	}
+	if _, writeErr := dataPkl.Write([]byte{0x80, 0x05}); writeErr != nil {
+		t.Fatalf("write data.pkl: %v", writeErr)
+	}
+
+	// Add a tensor storage file.
+	storage, err := w.Create("archive/data/0.storage")
+	if err != nil {
+		t.Fatalf("create storage: %v", err)
+	}
+	if _, writeErr := storage.Write(make([]byte, 100)); writeErr != nil {
+		t.Fatalf("write storage: %v", writeErr)
+	}
+
+	if closeErr := w.Close(); closeErr != nil {
+		t.Fatalf("close zip: %v", closeErr)
+	}
+
+	if writeErr := sp.WriteFile("model.pth", buf.Bytes(), 0o600); writeErr != nil {
+		t.Fatalf("write pth file: %v", writeErr)
+	}
+
+	metadata := d.extractMetadata(filepath.Join(tmpDir, "model.pth"), ModelTypePTH)
+
+	if metadata["format"] != "PyTorch ZIP archive" {
+		t.Errorf("expected format 'PyTorch ZIP archive', got %v", metadata["format"])
+	}
+	if metadata["pytorch_version"] != ">=1.6" {
+		t.Errorf("expected pytorch_version '>=1.6', got %v", metadata["pytorch_version"])
+	}
+	if metadata["has_data_pkl"] != true {
+		t.Error("expected has_data_pkl to be true")
+	}
+	if metadata["has_version"] != true {
+		t.Error("expected has_version to be true")
+	}
+	if metadata["pytorch_archive_version"] != "3" {
+		t.Errorf("expected pytorch_archive_version '3', got %v", metadata["pytorch_archive_version"])
+	}
+	if metadata["tensor_storage_count"] != 1 {
+		t.Errorf("expected tensor_storage_count 1, got %v", metadata["tensor_storage_count"])
+	}
+}
+
+func TestExtractPyTorchZIPWithTorchScript(t *testing.T) {
+	d := NewDetector()
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create a TorchScript model (has model.py).
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	// Add model.py file (indicates TorchScript).
+	modelPy, err := w.Create("archive/code/model.py")
+	if err != nil {
+		t.Fatalf("create model.py: %v", err)
+	}
+	if _, writeErr := modelPy.Write([]byte("# TorchScript model")); writeErr != nil {
+		t.Fatalf("write model.py: %v", writeErr)
+	}
+
+	if closeErr := w.Close(); closeErr != nil {
+		t.Fatalf("close zip: %v", closeErr)
+	}
+
+	if writeErr := sp.WriteFile("model.pt", buf.Bytes(), 0o600); writeErr != nil {
+		t.Fatalf("write pt file: %v", writeErr)
+	}
+
+	metadata := d.extractMetadata(filepath.Join(tmpDir, "model.pt"), ModelTypePTH)
+
+	if metadata["has_model_py"] != true {
+		t.Error("expected has_model_py to be true")
+	}
+	if metadata["model_type_hint"] != "TorchScript" {
+		t.Errorf("expected model_type_hint 'TorchScript', got %v", metadata["model_type_hint"])
+	}
+}
+
+func TestExtractONNXMetadataWithProducer(t *testing.T) {
+	d := NewDetector()
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create ONNX file with producer_name (field 2).
+	// Field 2, wire type 2 (length-delimited): tag = (2 << 3) | 2 = 0x12
+	// producer_name = "pytorch"
+	producerName := "pytorch"
+	onnxContent := []byte{
+		0x08, 0x07, // Field 1 (ir_version): varint 7
+		0x12, byte(len(producerName)), // Field 2 (producer_name): length prefix
+	}
+	onnxContent = append(onnxContent, []byte(producerName)...)
+	// Add producer_version (field 3)
+	producerVersion := "1.12.0"
+	onnxContent = append(onnxContent, 0x1a, byte(len(producerVersion))) // Field 3: tag 0x1a
+	onnxContent = append(onnxContent, []byte(producerVersion)...)
+
+	if writeErr := sp.WriteFile("model.onnx", onnxContent, 0o600); writeErr != nil {
+		t.Fatalf("write onnx file: %v", writeErr)
+	}
+
+	metadata := d.extractMetadata(filepath.Join(tmpDir, "model.onnx"), ModelTypeONNX)
+
+	if metadata["format"] != "ONNX protobuf" {
+		t.Errorf("expected format 'ONNX protobuf', got %v", metadata["format"])
+	}
+	if metadata["ir_version"] != int64(7) {
+		t.Errorf("expected ir_version 7, got %v", metadata["ir_version"])
+	}
+	if metadata["producer_name"] != producerName {
+		t.Errorf("expected producer_name '%s', got %v", producerName, metadata["producer_name"])
+	}
+	if metadata["producer_version"] != producerVersion {
+		t.Errorf("expected producer_version '%s', got %v", producerVersion, metadata["producer_version"])
+	}
+}
+
+func TestExtractONNXMetadataWithDomain(t *testing.T) {
+	d := NewDetector()
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create ONNX file with domain (field 4).
+	// Field 4, wire type 2: tag = (4 << 3) | 2 = 0x22
+	domain := "ai.onnx"
+	onnxContent := []byte{
+		0x08, 0x08, // Field 1 (ir_version): varint 8
+		0x22, byte(len(domain)), // Field 4 (domain): length prefix
+	}
+	onnxContent = append(onnxContent, []byte(domain)...)
+
+	if writeErr := sp.WriteFile("model.onnx", onnxContent, 0o600); writeErr != nil {
+		t.Fatalf("write onnx file: %v", writeErr)
+	}
+
+	metadata := d.extractMetadata(filepath.Join(tmpDir, "model.onnx"), ModelTypeONNX)
+
+	if metadata["domain"] != domain {
+		t.Errorf("expected domain '%s', got %v", domain, metadata["domain"])
+	}
+}
+
+func TestExtractH5SuperblockInfo(t *testing.T) {
+	d := NewDetector()
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create HDF5 file with superblock version 0.
+	// HDF5 signature + superblock version 0 + additional bytes.
+	h5Content := []byte{
+		0x89, 0x48, 0x44, 0x46, 0x0d, 0x0a, 0x1a, 0x0a, // HDF5 signature (bytes 0-7)
+		0x00, // Superblock version 0 (byte 8)
+		0x01, // Free-space storage version (byte 9)
+		0x01, // Root group symbol table entry version (byte 10)
+		0x00, // Reserved (byte 11)
+		0x00, // Shared header message format version (byte 12)
+		0x08, // Size of offsets (byte 13)
+		0x08, // Size of lengths (byte 14)
+		0x00, // Extra byte to reach 16 bytes minimum (byte 15)
+	}
+	if writeErr := sp.WriteFile("model.h5", h5Content, 0o600); writeErr != nil {
+		t.Fatalf("write h5 file: %v", writeErr)
+	}
+
+	metadata := d.extractMetadata(filepath.Join(tmpDir, "model.h5"), ModelTypeH5)
+
+	if metadata["is_valid_hdf5"] != true {
+		t.Error("expected is_valid_hdf5 to be true")
+	}
+	if metadata["superblock_version"] != 0 {
+		t.Errorf("expected superblock_version 0, got %v", metadata["superblock_version"])
+	}
+	if metadata["free_space_version"] != 1 {
+		t.Errorf("expected free_space_version 1, got %v", metadata["free_space_version"])
+	}
+	if metadata["root_group_version"] != 1 {
+		t.Errorf("expected root_group_version 1, got %v", metadata["root_group_version"])
+	}
+	if metadata["offset_size"] != 8 {
+		t.Errorf("expected offset_size 8, got %v", metadata["offset_size"])
+	}
+	if metadata["length_size"] != 8 {
+		t.Errorf("expected length_size 8, got %v", metadata["length_size"])
+	}
+}
+
+func TestExtractH5SuperblockVersion2(t *testing.T) {
+	d := NewDetector()
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create HDF5 file with superblock version 2.
+	h5Content := []byte{
+		0x89, 0x48, 0x44, 0x46, 0x0d, 0x0a, 0x1a, 0x0a, // HDF5 signature (bytes 0-7)
+		0x02,                         // Superblock version 2 (byte 8)
+		0x08,                         // Size of offsets (byte 9)
+		0x08,                         // Size of lengths (byte 10)
+		0x00, 0x00, 0x00, 0x00, 0x00, // Padding to reach 16 bytes
+	}
+	if writeErr := sp.WriteFile("model.h5", h5Content, 0o600); writeErr != nil {
+		t.Fatalf("write h5 file: %v", writeErr)
+	}
+
+	metadata := d.extractMetadata(filepath.Join(tmpDir, "model.h5"), ModelTypeH5)
+
+	if metadata["superblock_version"] != 2 {
+		t.Errorf("expected superblock_version 2, got %v", metadata["superblock_version"])
+	}
+	if metadata["offset_size"] != 8 {
+		t.Errorf("expected offset_size 8, got %v", metadata["offset_size"])
+	}
+}
+
+func TestExtractKerasModelHints(t *testing.T) {
+	d := NewDetector()
+	tmpDir := t.TempDir()
+	sp, err := safepath.New(tmpDir)
+	if err != nil {
+		t.Fatalf("create safepath: %v", err)
+	}
+
+	// Create HDF5 file with Keras hints in data.
+	h5Content := []byte{
+		0x89, 0x48, 0x44, 0x46, 0x0d, 0x0a, 0x1a, 0x0a, // HDF5 signature
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Padding
+	}
+	// Add keras version string.
+	h5Content = append(h5Content, []byte("keras_version2.12.0model_configmodel_weights")...)
+
+	if writeErr := sp.WriteFile("keras_model.h5", h5Content, 0o600); writeErr != nil {
+		t.Fatalf("write h5 file: %v", writeErr)
+	}
+
+	metadata := d.extractMetadata(filepath.Join(tmpDir, "keras_model.h5"), ModelTypeH5)
+
+	if metadata["is_valid_hdf5"] != true {
+		t.Error("expected is_valid_hdf5 to be true")
+	}
+	if metadata["is_keras_model"] != true {
+		t.Error("expected is_keras_model to be true")
+	}
+	hints, ok := metadata["keras_hints"].([]string)
+	if !ok {
+		t.Error("expected keras_hints to be []string")
+	} else if len(hints) < 2 {
+		t.Errorf("expected at least 2 keras hints, got %d", len(hints))
+	}
+}
+
+func TestReadVarint(t *testing.T) {
+	d := NewDetector()
+
+	tests := []struct {
+		name      string
+		data      []byte
+		wantValue int64
+		wantBytes int
+	}{
+		{"single byte", []byte{0x07}, 7, 1},
+		{"two bytes", []byte{0x80, 0x01}, 128, 2},
+		{"large value", []byte{0xFF, 0x01}, 255, 2},
+		{"empty", []byte{}, 0, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value, n := d.readVarint(tt.data)
+			if value != tt.wantValue {
+				t.Errorf("expected value %d, got %d", tt.wantValue, value)
+			}
+			if n != tt.wantBytes {
+				t.Errorf("expected %d bytes, got %d", tt.wantBytes, n)
+			}
+		})
+	}
+}
+
+func TestMinInt(t *testing.T) {
+	tests := []struct {
+		a, b, want int
+	}{
+		{1, 2, 1},
+		{2, 1, 1},
+		{5, 5, 5},
+		{-1, 1, -1},
+		{0, 0, 0},
+	}
+
+	for _, tt := range tests {
+		if got := minInt(tt.a, tt.b); got != tt.want {
+			t.Errorf("minInt(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
+		}
 	}
 }
 
