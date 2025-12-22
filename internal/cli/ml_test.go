@@ -742,8 +742,8 @@ func TestFormatValidationResult(t *testing.T) {
 //nolint:govet // Field order matches ml.ValidationResult for readability.
 type validationResultForTest struct {
 	SchemaName string
-	Statistics validationStats
 	Errors     []validationError
+	Statistics validationStats
 	Valid      bool
 }
 
