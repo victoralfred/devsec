@@ -12,10 +12,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/victoralfred/devsec/internal/compliance"
 	"github.com/victoralfred/devsec/internal/model"
+	"github.com/victoralfred/devsec/internal/progress"
 	"github.com/victoralfred/devsec/internal/scanner/gitleaks"
 	"github.com/victoralfred/devsec/internal/scanner/osv"
 	"github.com/victoralfred/devsec/internal/scanner/semgrep"
 	"github.com/victoralfred/devsec/internal/scanner/trivy"
+	"github.com/victoralfred/devsec/internal/tui"
 	"github.com/victoralfred/gowritter/safepath"
 )
 
@@ -120,6 +122,11 @@ func runComplianceAssess(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
+	// Use TUI if enabled and scanning is needed (no scan-file provided).
+	if IsProgressEnabled() && complianceAssessScanFile == "" {
+		return runComplianceAssessWithTUI(cmd, absPath)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), complianceAssessTimeout)
 	defer cancel()
 
@@ -163,6 +170,284 @@ func runComplianceAssess(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeComplianceOutput(cmd, output, complianceAssessOutput)
+}
+
+// complianceResult holds the result of a compliance assessment.
+type complianceResult struct {
+	err    error
+	report *compliance.Report
+	output []byte
+}
+
+// runComplianceAssessWithTUI runs compliance assessment with TUI progress display.
+func runComplianceAssessWithTUI(cmd *cobra.Command, absPath string) error {
+	reporter, events := progress.NewChannelReporter(100)
+
+	tuiModel := tui.NewModel(tui.Config{
+		CommandName: "compliance-assess",
+		CommandType: tui.CommandTypeCompliance,
+		Events:      events,
+	})
+
+	// Result channel for capturing the final result.
+	resultChan := make(chan complianceResult, 1)
+
+	// Run assessment in goroutine.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), complianceAssessTimeout)
+		defer cancel()
+
+		// Run scans with progress reporting.
+		reporter.ReportLog("info", fmt.Sprintf("Scanning %s for security findings...", absPath))
+		findings, err := runQuickScanWithProgress(ctx, absPath, reporter)
+		if err != nil {
+			reporter.ReportCompleted(nil, fmt.Errorf("scan: %w", err))
+			reporter.Close()
+			resultChan <- complianceResult{err: fmt.Errorf("scan: %w", err)}
+			return
+		}
+
+		// Parse frameworks.
+		reporter.ReportStageStarted("compliance-mapping")
+		reporter.ReportLog("info", "Mapping findings to compliance controls...")
+		frameworks := parseFrameworks(complianceAssessFramework)
+
+		// Create mapper and generator.
+		mapper := compliance.NewMapper()
+		generator := compliance.NewReportGenerator(mapper)
+
+		opts := compliance.GenerateOptions{
+			Frameworks:  frameworks,
+			IncludeGaps: true,
+		}
+
+		report, err := generator.Generate(ctx, findings, opts)
+		if err != nil {
+			reporter.ReportStageCompleted("compliance-mapping", progress.StatusFailed, 0)
+			reporter.ReportCompleted(nil, fmt.Errorf("generate report: %w", err))
+			reporter.Close()
+			resultChan <- complianceResult{err: fmt.Errorf("generate report: %w", err)}
+			return
+		}
+		reporter.ReportStageCompleted("compliance-mapping", progress.StatusSuccess, 0)
+
+		// Format output.
+		formatter := compliance.GetFormatter(complianceAssessFormat)
+		output, err := formatter.Format(report)
+		if err != nil {
+			reporter.ReportCompleted(nil, fmt.Errorf("format report: %w", err))
+			reporter.Close()
+			resultChan <- complianceResult{err: fmt.Errorf("format report: %w", err)}
+			return
+		}
+
+		// Write output.
+		if complianceAssessOutput != "" {
+			absOutput, err := filepath.Abs(complianceAssessOutput)
+			if err != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("resolve output path: %w", err))
+				reporter.Close()
+				resultChan <- complianceResult{err: fmt.Errorf("resolve output path: %w", err)}
+				return
+			}
+
+			dir := filepath.Dir(absOutput)
+			filename := filepath.Base(absOutput)
+
+			sp, err := safepath.New(dir)
+			if err != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("create safepath: %w", err))
+				reporter.Close()
+				resultChan <- complianceResult{err: fmt.Errorf("create safepath: %w", err)}
+				return
+			}
+
+			if err := sp.WriteFile(filename, output, 0o644); err != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("write output: %w", err))
+				reporter.Close()
+				resultChan <- complianceResult{err: fmt.Errorf("write output: %w", err)}
+				return
+			}
+
+			reporter.ReportLog("info", fmt.Sprintf("Results written to: %s", absOutput))
+		}
+
+		reporter.ReportCompleted(report, nil)
+		reporter.Close()
+		resultChan <- complianceResult{report: report, output: output}
+	}()
+
+	// Run TUI.
+	if tuiErr := tui.Run(tuiModel); tuiErr != nil {
+		res := <-resultChan
+		if res.err != nil {
+			return fmt.Errorf("compliance assessment failed: %w", res.err)
+		}
+		return fmt.Errorf("TUI error: %w", tuiErr)
+	}
+
+	// Get the result.
+	res := <-resultChan
+	if res.err != nil {
+		return res.err
+	}
+
+	// Print output to stdout if no output file was specified.
+	if complianceAssessOutput == "" && len(res.output) > 0 {
+		cmd.Println(string(res.output))
+	}
+
+	return nil
+}
+
+// runQuickScanWithProgress runs security scanners with progress reporting.
+func runQuickScanWithProgress(ctx context.Context, path string, reporter progress.Reporter) ([]model.Finding, error) {
+	// Check context cancellation early.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	scanners := []string{"gitleaks", "osv", "semgrep", "trivy"}
+	var wg sync.WaitGroup
+	results := make(chan scannerResult, 4)
+
+	// Report all scanner stages.
+	for _, name := range scanners {
+		reporter.ReportStageStarted(name)
+	}
+
+	// Run gitleaks for secret detection.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		startTime := time.Now()
+		scanner, err := gitleaks.New()
+		if err != nil {
+			reporter.ReportStageCompleted("gitleaks", progress.StatusFailed, time.Since(startTime))
+			results <- scannerResult{name: "gitleaks", err: err}
+			return
+		}
+		defer func() { _ = scanner.Close(ctx) }()
+
+		findings, err := scanner.Scan(ctx, path)
+		if err != nil {
+			reporter.ReportStageCompleted("gitleaks", progress.StatusFailed, time.Since(startTime))
+		} else {
+			reporter.ReportStageCompleted("gitleaks", progress.StatusSuccess, time.Since(startTime))
+		}
+		results <- scannerResult{name: "gitleaks", findings: findings, err: err}
+	}()
+
+	// Run OSV for dependency vulnerabilities.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		startTime := time.Now()
+		scanner := osv.New()
+		defer func() { _ = scanner.Close(ctx) }()
+
+		findings, err := scanner.Scan(ctx, path)
+		if err != nil {
+			reporter.ReportStageCompleted("osv", progress.StatusFailed, time.Since(startTime))
+		} else {
+			reporter.ReportStageCompleted("osv", progress.StatusSuccess, time.Since(startTime))
+		}
+		results <- scannerResult{name: "osv", findings: findings, err: err}
+	}()
+
+	// Run Semgrep for SAST (if available).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		startTime := time.Now()
+		scanner := semgrep.New()
+		defer func() { _ = scanner.Close(ctx) }()
+
+		findings, err := scanner.Scan(ctx, path)
+		if err != nil {
+			reporter.ReportStageCompleted("semgrep", progress.StatusFailed, time.Since(startTime))
+		} else {
+			reporter.ReportStageCompleted("semgrep", progress.StatusSuccess, time.Since(startTime))
+		}
+		results <- scannerResult{name: "semgrep", findings: findings, err: err}
+	}()
+
+	// Run Trivy for container/filesystem vulnerabilities.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		startTime := time.Now()
+		scanner := trivy.New()
+		defer func() { _ = scanner.Close(ctx) }()
+
+		findings, err := scanner.Scan(ctx, path)
+		if err != nil {
+			reporter.ReportStageCompleted("trivy", progress.StatusFailed, time.Since(startTime))
+		} else {
+			reporter.ReportStageCompleted("trivy", progress.StatusSuccess, time.Since(startTime))
+		}
+		results <- scannerResult{name: "trivy", findings: findings, err: err}
+	}()
+
+	// Wait for all scanners to complete.
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Aggregate findings from all scanners.
+	var allFindings []model.Finding
+	var scanErrors []string
+
+	for result := range results {
+		if result.err != nil {
+			// Log scanner errors but continue with other scanners.
+			scanErrors = append(scanErrors, fmt.Sprintf("%s: %v", result.name, result.err))
+			reporter.ReportLog("warn", fmt.Sprintf("Scanner %s failed: %v", result.name, result.err))
+			continue
+		}
+		allFindings = append(allFindings, result.findings...)
+
+		// Report findings count.
+		if len(result.findings) > 0 {
+			reporter.ReportLog("info", fmt.Sprintf("%s found %d findings", result.name, len(result.findings)))
+			for i := range result.findings {
+				reporter.ReportFinding(result.findings[i])
+			}
+		}
+	}
+
+	// Update overall finding count.
+	reporter.ReportFindingCount(countComplianceFindings(allFindings))
+
+	// If all scanners failed, return an error.
+	if len(allFindings) == 0 && len(scanErrors) == len(scanners) {
+		return nil, fmt.Errorf("all scanners failed: %s", strings.Join(scanErrors, "; "))
+	}
+
+	return allFindings, nil
+}
+
+// countComplianceFindings counts findings by severity.
+func countComplianceFindings(findings []model.Finding) progress.FindingCount {
+	var count progress.FindingCount
+	for i := range findings {
+		switch findings[i].Severity {
+		case model.SeverityCritical:
+			count.Critical++
+		case model.SeverityHigh:
+			count.High++
+		case model.SeverityMedium:
+			count.Medium++
+		case model.SeverityLow:
+			count.Low++
+		case model.SeverityInfo:
+			count.Info++
+		}
+	}
+	return count
 }
 
 // NewComplianceReportCmd creates the compliance report subcommand.

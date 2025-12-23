@@ -11,6 +11,7 @@ import (
 	"github.com/victoralfred/devsec/internal/compliance"
 	"github.com/victoralfred/devsec/internal/model"
 	"github.com/victoralfred/devsec/internal/policy"
+	"github.com/victoralfred/devsec/internal/progress"
 	"github.com/victoralfred/devsec/internal/report"
 	"github.com/victoralfred/devsec/internal/scanner/gitleaks"
 	"github.com/victoralfred/devsec/internal/scanner/osv"
@@ -23,11 +24,12 @@ import (
 // RunnerInput provides input data to stage runners.
 // Fields are ordered for optimal memory alignment.
 type RunnerInput struct {
-	PreviousResults map[string]StageResult
-	Assessments     map[compliance.FrameworkID][]compliance.ControlAssessment
-	WorkDir         string
-	Findings        []model.Finding
-	PolicyResults   []policy.EvaluationResult
+	PreviousResults  map[string]StageResult
+	Assessments      map[compliance.FrameworkID][]compliance.ControlAssessment
+	ProgressReporter progress.Reporter
+	WorkDir          string
+	Findings         []model.Finding
+	PolicyResults    []policy.EvaluationResult
 }
 
 // StageRunner interface for executing stages.
@@ -155,6 +157,12 @@ func (r *ScanRunner) Run(ctx context.Context, stage Stage, input RunnerInput) (S
 		return createResult(stage.Name, StageStatusFailed, startTime, err), err
 	}
 
+	// Report findings to progress reporter.
+	if input.ProgressReporter != nil && len(findings) > 0 {
+		count := countFindingsBySeverity(findings)
+		input.ProgressReporter.ReportFindingCount(count)
+	}
+
 	result := createResult(stage.Name, StageStatusSuccess, startTime, nil)
 	result.Artifacts = map[string]any{
 		"scanner":       scannerType,
@@ -164,6 +172,26 @@ func (r *ScanRunner) Run(ctx context.Context, stage Stage, input RunnerInput) (S
 	}
 
 	return result, nil
+}
+
+// countFindingsBySeverity counts findings by severity level.
+func countFindingsBySeverity(findings []model.Finding) progress.FindingCount {
+	var count progress.FindingCount
+	for i := range findings {
+		switch findings[i].Severity {
+		case model.SeverityCritical:
+			count.Critical++
+		case model.SeverityHigh:
+			count.High++
+		case model.SeverityMedium:
+			count.Medium++
+		case model.SeverityLow:
+			count.Low++
+		default:
+			count.Info++
+		}
+	}
+	return count
 }
 
 // runScanner creates and executes the appropriate scanner.

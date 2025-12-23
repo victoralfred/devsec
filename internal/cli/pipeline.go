@@ -10,6 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/victoralfred/devsec/internal/pipeline"
+	"github.com/victoralfred/devsec/internal/progress"
+	"github.com/victoralfred/devsec/internal/tui"
 	"github.com/victoralfred/gowritter/safepath"
 )
 
@@ -167,6 +169,11 @@ func runPipelineRun(cmd *cobra.Command, args []string) error {
 		return showExecutionPlan(cmd, p, executor)
 	}
 
+	// Check if TUI progress is enabled.
+	if IsProgressEnabled() {
+		return runPipelineWithTUI(ctx, cmd, p, executor, opts)
+	}
+
 	// Execute pipeline.
 	if verbose {
 		cmd.Printf("Executing pipeline: %s\n", p.Name)
@@ -187,6 +194,86 @@ func runPipelineRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if result.Status == pipeline.StageStatusFailed {
+		return fmt.Errorf("pipeline completed with failures")
+	}
+
+	return nil
+}
+
+// runPipelineWithTUI executes the pipeline with TUI progress display.
+func runPipelineWithTUI(
+	ctx context.Context,
+	cmd *cobra.Command,
+	p *pipeline.Pipeline,
+	executor *pipeline.DefaultExecutor,
+	opts pipeline.ExecuteOptions,
+) error {
+	// Create channel reporter for progress events.
+	reporter, events := progress.NewChannelReporter(100)
+	opts.ProgressReporter = reporter
+
+	// Extract stage names for TUI.
+	stageNames := make([]string, 0, len(p.Stages))
+	for i := range p.Stages {
+		stageNames = append(stageNames, p.Stages[i].Name)
+	}
+
+	// Create TUI model.
+	model := tui.NewModel(tui.Config{
+		CommandName: p.Name,
+		CommandType: tui.CommandTypePipeline,
+		Events:      events,
+		Stages:      stageNames,
+	})
+
+	// Get terminal size.
+	width, height, err := tui.GetTerminalSize()
+	if err != nil {
+		width, height = 80, 24 // Default size
+	}
+	model.SetSize(width, height)
+
+	// Result channel.
+	type execResult struct {
+		err    error
+		result pipeline.PipelineResult
+	}
+	resultChan := make(chan execResult, 1)
+
+	// Execute pipeline in background.
+	go func() {
+		result, execErr := executor.Execute(ctx, *p, opts)
+		reporter.ReportCompleted(result, execErr)
+		reporter.Close()
+		resultChan <- execResult{result: result, err: execErr}
+	}()
+
+	// Run TUI.
+	if tuiErr := tui.Run(model); tuiErr != nil {
+		// TUI error - still wait for result.
+		res := <-resultChan
+		if res.err != nil {
+			return fmt.Errorf("pipeline failed: %w", res.err)
+		}
+		return fmt.Errorf("TUI error: %w", tuiErr)
+	}
+
+	// Get execution result.
+	res := <-resultChan
+
+	// Output results after TUI exits.
+	if outputErr := outputPipelineResults(cmd, res.result); outputErr != nil {
+		if res.err != nil {
+			return fmt.Errorf("execution failed: %w (output error: %v)", res.err, outputErr)
+		}
+		return fmt.Errorf("output results: %w", outputErr)
+	}
+
+	if res.err != nil {
+		return fmt.Errorf("pipeline execution failed: %w", res.err)
+	}
+
+	if res.result.Status == pipeline.StageStatusFailed {
 		return fmt.Errorf("pipeline completed with failures")
 	}
 
