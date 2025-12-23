@@ -2,7 +2,6 @@ package compliance
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/victoralfred/devsec/internal/model"
@@ -339,26 +338,5 @@ func TestAssessControlNoFindings(t *testing.T) {
 
 	if assessment.Status != StatusCompliant {
 		t.Errorf("expected compliant, got %s", assessment.Status)
-	}
-}
-
-func TestIndexSubstring(t *testing.T) {
-	tests := []struct {
-		s      string
-		substr string
-		want   int
-	}{
-		{"hello world", "world", 6},
-		{"hello world", "hello", 0},
-		{"hello world", "x", -1},
-		{"", "x", -1},
-		{"x", "xx", -1},
-	}
-
-	for _, tt := range tests {
-		got := strings.Index(tt.s, tt.substr)
-		if got != tt.want {
-			t.Errorf("indexSubstring(%q, %q) = %d, want %d", tt.s, tt.substr, got, tt.want)
-		}
 	}
 }

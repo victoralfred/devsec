@@ -283,7 +283,7 @@ func buildDescription(gf *Finding) string {
 	builder.WriteString("'")
 
 	if gf.Commit != "" {
-		commitLen := minInt(8, len(gf.Commit))
+		commitLen := min(8, len(gf.Commit))
 		builder.WriteString(" in commit ")
 		builder.WriteString(gf.Commit[:commitLen])
 	}
@@ -307,14 +307,6 @@ func (s *Scanner) cleanupReport(reportPath string) error {
 	}
 
 	return sp.Remove(filename)
-}
-
-// minInt returns the minimum of two integers.
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // Close shuts down the scanner's executor.

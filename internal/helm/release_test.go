@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -375,7 +376,7 @@ func TestIsReleaseExistsError(t *testing.T) {
 			t.Parallel()
 			if tt.err != nil {
 				errStr := tt.err.Error()
-				result := contains(errStr, "already exists") || contains(errStr, "cannot re-use")
+				result := strings.Contains(errStr, "already exists") || strings.Contains(errStr, "cannot re-use")
 				if result != tt.expected {
 					t.Errorf("isReleaseExistsError(%v) = %v, want %v", tt.err, result, tt.expected)
 				}
@@ -401,7 +402,7 @@ func TestIsRevisionNotFoundError(t *testing.T) {
 			t.Parallel()
 			if tt.err != nil {
 				errStr := tt.err.Error()
-				result := contains(errStr, "revision") && contains(errStr, "not found")
+				result := strings.Contains(errStr, "revision") && strings.Contains(errStr, "not found")
 				if result != tt.expected {
 					t.Errorf("isRevisionNotFoundError(%v) = %v, want %v", tt.err, result, tt.expected)
 				}

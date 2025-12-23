@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -159,9 +160,9 @@ func TestIsChartNotFoundError(t *testing.T) {
 			// Test the helper on error strings.
 			if tt.err != nil {
 				errStr := tt.err.Error()
-				result := contains(errStr, "not found") ||
-					contains(errStr, "no such file") ||
-					contains(errStr, "does not exist")
+				result := strings.Contains(errStr, "not found") ||
+					strings.Contains(errStr, "no such file") ||
+					strings.Contains(errStr, "does not exist")
 				// This tests the string matching logic.
 				_ = result
 			}

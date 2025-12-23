@@ -3,6 +3,7 @@ package helm
 import (
 	"context"
 	"path/filepath"
+	"strings"
 
 	"github.com/victoralfred/gowritter/safepath"
 	"helm.sh/helm/v3/pkg/action"
@@ -125,20 +126,5 @@ func isReleaseNotFoundError(err error) bool {
 	}
 	// Helm returns a specific error message pattern for release not found.
 	errStr := err.Error()
-	return contains(errStr, "not found") || contains(errStr, "release: not found")
-}
-
-// contains checks if s contains substr.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr) >= 0
-}
-
-// searchString returns the index of substr in s, or -1 if not found.
-func searchString(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
+	return strings.Contains(errStr, "not found") || strings.Contains(errStr, "release: not found")
 }

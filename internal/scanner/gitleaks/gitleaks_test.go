@@ -356,7 +356,7 @@ func TestBuildDescription(t *testing.T) {
 	}
 }
 
-func TestMinInt(t *testing.T) {
+func TestMin(t *testing.T) {
 	tests := []struct {
 		a, b, expected int
 	}{
@@ -368,9 +368,9 @@ func TestMinInt(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := minInt(tt.a, tt.b)
+		result := min(tt.a, tt.b)
 		if result != tt.expected {
-			t.Errorf("minInt(%d, %d) = %d, expected %d", tt.a, tt.b, result, tt.expected)
+			t.Errorf("min(%d, %d) = %d, expected %d", tt.a, tt.b, result, tt.expected)
 		}
 	}
 }

@@ -276,7 +276,7 @@ func parseOptimizerConfig(optCfg map[string]any) *OptimizerConfig {
 }
 
 // extractLayerInfo extracts layer information from a group.
-func extractLayerInfo(group *hdf5.Group, path string, config *KerasModelConfig) {
+func extractLayerInfo(_ *hdf5.Group, path string, config *KerasModelConfig) {
 	// Extract layer name from path.
 	parts := strings.Split(path, "/")
 	if len(parts) > 0 {
@@ -294,8 +294,6 @@ func extractLayerInfo(group *hdf5.Group, path string, config *KerasModelConfig) 
 			Trainable: true,
 		})
 	}
-	// Silence unused warning.
-	_ = group
 }
 
 // extractOptimizerInfo extracts optimizer information from a dataset.

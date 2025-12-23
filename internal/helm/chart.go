@@ -1,8 +1,8 @@
 package helm
 
 import (
-	"bytes"
 	"context"
+	"strings"
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
@@ -140,9 +140,9 @@ func isChartNotFoundError(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	return contains(errStr, "not found") ||
-		contains(errStr, "no such file") ||
-		contains(errStr, "does not exist")
+	return strings.Contains(errStr, "not found") ||
+		strings.Contains(errStr, "no such file") ||
+		strings.Contains(errStr, "does not exist")
 }
 
 // RenderValues renders template values for a chart.
@@ -186,10 +186,8 @@ func PackageChart(chartPath, destination string) (string, error) {
 		return "", NewHelmError("validate chart", "", "", ErrChartInvalid)
 	}
 
-	var buf bytes.Buffer
 	name, err := chartutil.Save(ch, destination)
 	if err != nil {
-		_ = buf // Suppress unused variable warning.
 		return "", NewHelmError("save chart", "", "", err)
 	}
 
