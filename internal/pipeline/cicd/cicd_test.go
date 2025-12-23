@@ -210,12 +210,14 @@ func TestDetectProvider(t *testing.T) {
 	saved := make(map[string]string)
 	for _, env := range envVars {
 		saved[env] = os.Getenv(env)
-		os.Unsetenv(env)
+		if err := os.Unsetenv(env); err != nil {
+			t.Fatalf("failed to unset %s: %v", env, err)
+		}
 	}
 	defer func() {
 		for env, val := range saved {
 			if val != "" {
-				os.Setenv(env, val)
+				_ = os.Setenv(env, val)
 			}
 		}
 	}()
