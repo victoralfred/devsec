@@ -6,6 +6,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/nlpodyssey/gopickle v0.3.0
 	github.com/open-policy-agent/opa v1.12.1
+	github.com/prometheus/client_golang v1.23.2
+	github.com/prometheus/client_model v0.6.2
 	github.com/scigolib/hdf5 v0.13.1
 	github.com/spf13/cobra v1.10.2
 	github.com/victoralfred/goexec v0.1.0
@@ -114,8 +116,6 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/prometheus/client_golang v1.23.2 // indirect
-	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.17.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
