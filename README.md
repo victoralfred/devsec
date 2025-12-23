@@ -66,6 +66,8 @@ devsec pipeline run
 
 For detailed installation instructions, see [SETUP.md](SETUP.md).
 
+For CI/CD integration and webhook configuration, see [WEBHOOKS.md](WEBHOOKS.md).
+
 ## CLI Reference
 
 ### Root Commands
