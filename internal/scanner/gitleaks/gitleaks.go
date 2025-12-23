@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,8 +16,8 @@ import (
 	"github.com/victoralfred/gowritter/safepath"
 )
 
-// DefaultBinaryPath is the default path to the gitleaks binary.
-const DefaultBinaryPath = "/usr/bin/gitleaks"
+// DefaultBinaryName is the default name of the gitleaks binary.
+const DefaultBinaryName = "gitleaks"
 
 // DefaultTimeout is the default timeout for gitleaks execution.
 const DefaultTimeout = 5 * time.Minute
@@ -78,29 +79,38 @@ func WithConfigFile(path string) Option {
 }
 
 // WithExecutor sets a custom executor for command execution.
-func WithExecutor(exec goexec.Executor) Option {
+func WithExecutor(executor goexec.Executor) Option {
 	return func(s *Scanner) {
-		s.executor = exec
+		s.executor = executor
 	}
 }
 
 // New creates a new Gitleaks scanner with the given options.
 func New(opts ...Option) (*Scanner, error) {
 	s := &Scanner{
-		binaryPath: DefaultBinaryPath,
-		timeout:    DefaultTimeout,
+		timeout: DefaultTimeout,
 	}
 
 	for _, opt := range opts {
 		opt(s)
 	}
 
+	// If no binary path specified, look it up in PATH.
+	if s.binaryPath == "" {
+		if path, err := exec.LookPath(DefaultBinaryName); err == nil {
+			s.binaryPath = path
+		} else {
+			// Fallback to name only, will fail at execution time with clear error.
+			s.binaryPath = DefaultBinaryName
+		}
+	}
+
 	if s.executor == nil {
-		exec, err := goexec.New()
+		executor, err := goexec.New()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create executor: %w", err)
 		}
-		s.executor = exec
+		s.executor = executor
 	}
 
 	return s, nil

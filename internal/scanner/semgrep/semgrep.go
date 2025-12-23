@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -14,8 +15,8 @@ import (
 	"github.com/victoralfred/gowritter/safepath"
 )
 
-// DefaultBinaryPath is the default path to the semgrep binary.
-const DefaultBinaryPath = "/usr/bin/semgrep"
+// DefaultBinaryName is the default name of the semgrep binary.
+const DefaultBinaryName = "semgrep"
 
 // DefaultTimeout is the default timeout for semgrep execution.
 const DefaultTimeout = 10 * time.Minute
@@ -56,31 +57,40 @@ func WithConfigFile(path string) Option {
 }
 
 // WithExecutor sets a custom executor for command execution.
-func WithExecutor(exec goexec.Executor) Option {
+func WithExecutor(executor goexec.Executor) Option {
 	return func(s *Scanner) {
-		s.executor = exec
+		s.executor = executor
 	}
 }
 
 // New creates a new Semgrep scanner.
 func New(opts ...Option) *Scanner {
 	s := &Scanner{
-		binaryPath: DefaultBinaryPath,
-		timeout:    DefaultTimeout,
+		timeout: DefaultTimeout,
 	}
 
 	for _, opt := range opts {
 		opt(s)
 	}
 
+	// If no binary path specified, look it up in PATH.
+	if s.binaryPath == "" {
+		if path, err := exec.LookPath(DefaultBinaryName); err == nil {
+			s.binaryPath = path
+		} else {
+			// Fallback to name only, will fail at execution time with clear error.
+			s.binaryPath = DefaultBinaryName
+		}
+	}
+
 	if s.executor == nil {
-		exec, err := goexec.New()
+		executor, err := goexec.New()
 		if err != nil {
 			// In case of error, create a minimal scanner.
 			// The Scan method will fail appropriately.
 			return s
 		}
-		s.executor = exec
+		s.executor = executor
 	}
 
 	return s

@@ -23,8 +23,9 @@ func TestNew(t *testing.T) {
 	scanner := New()
 	defer closeScanner(t, scanner)
 
-	if scanner.binaryPath != DefaultBinaryPath {
-		t.Errorf("expected binaryPath %s, got %s", DefaultBinaryPath, scanner.binaryPath)
+	// binaryPath should be set (either found in PATH or fallback to name).
+	if scanner.binaryPath == "" {
+		t.Error("expected binaryPath to be set")
 	}
 
 	if scanner.timeout != DefaultTimeout {
