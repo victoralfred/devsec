@@ -728,7 +728,7 @@ func (d *Detector) extractH5Metadata(data []byte, metadata map[string]interface{
 
 	// HDF5 magic bytes: 0x89 0x48 0x44 0x46 0x0d 0x0a 0x1a 0x0a
 	h5Magic := []byte{0x89, 0x48, 0x44, 0x46, 0x0d, 0x0a, 0x1a, 0x0a}
-	if len(data) >= 8 && bytesEqual(data[:8], h5Magic) {
+	if len(data) >= 8 && bytes.Equal(data[:8], h5Magic) {
 		metadata["format"] = "HDF5"
 		metadata["is_valid_hdf5"] = true
 
@@ -816,7 +816,7 @@ func (d *Detector) detectKerasModelHints(data []byte, metadata map[string]interf
 		// Try to extract keras version if present.
 		if idx := strings.Index(dataStr, "keras_version"); idx != -1 {
 			// Look for version string nearby (format varies).
-			searchArea := dataStr[idx:minInt(idx+100, len(dataStr))]
+			searchArea := dataStr[idx:min(idx+100, len(dataStr))]
 			// Common version patterns.
 			for _, prefix := range []string{"2.", "3."} {
 				if vIdx := strings.Index(searchArea, prefix); vIdx != -1 {
@@ -833,14 +833,6 @@ func (d *Detector) detectKerasModelHints(data []byte, metadata map[string]interf
 			}
 		}
 	}
-}
-
-// minInt returns the minimum of two integers.
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // extractPyTorchMetadata extracts metadata from PyTorch model files.
@@ -1164,36 +1156,12 @@ func (d *Detector) extractSafetensorsMetadata(data []byte, metadata map[string]i
 		headerEnd := 8 + int(headerSize) //nolint:gosec // headerSize validated above.
 		if headerEnd <= len(data) {
 			headerJSON := string(data[8:headerEnd])
-			tensorCount := countOccurrences(headerJSON, "\"dtype\"")
+			tensorCount := strings.Count(headerJSON, "\"dtype\"")
 			if tensorCount > 0 {
 				metadata["tensor_count"] = tensorCount
 			}
 		}
 	}
-}
-
-// bytesEqual compares two byte slices for equality.
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// countOccurrences counts the number of times a substring appears in a string.
-func countOccurrences(s, substr string) int {
-	count := 0
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			count++
-		}
-	}
-	return count
 }
 
 // walkDirectory walks a directory tree using safepath.

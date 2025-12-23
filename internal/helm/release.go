@@ -2,6 +2,7 @@ package helm
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
@@ -415,7 +416,7 @@ func isReleaseExistsError(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	return contains(errStr, "already exists") || contains(errStr, "cannot re-use")
+	return strings.Contains(errStr, "already exists") || strings.Contains(errStr, "cannot re-use")
 }
 
 // isRevisionNotFoundError checks if the error indicates revision not found.
@@ -424,5 +425,5 @@ func isRevisionNotFoundError(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	return contains(errStr, "revision") && contains(errStr, "not found")
+	return strings.Contains(errStr, "revision") && strings.Contains(errStr, "not found")
 }

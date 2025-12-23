@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -828,18 +829,18 @@ func TestParseNotebook(t *testing.T) {
 	}
 
 	// Should contain code from code cells.
-	if !contains(content, "print('hello')") {
+	if !strings.Contains(content, "print('hello')") {
 		t.Error("expected content to contain code from first code cell")
 	}
-	if !contains(content, "y = 2") {
+	if !strings.Contains(content, "y = 2") {
 		t.Error("expected content to contain code from second code cell")
 	}
 
 	// Should not contain markdown or raw content.
-	if contains(content, "# Title") {
+	if strings.Contains(content, "# Title") {
 		t.Error("content should not contain markdown cells")
 	}
-	if contains(content, "raw content") {
+	if strings.Contains(content, "raw content") {
 		t.Error("content should not contain raw cells")
 	}
 }
@@ -898,10 +899,10 @@ func TestParseNotebookWithCells(t *testing.T) {
 	foundPyTorchCell3 := false
 
 	for _, ci := range result.CellImports {
-		if ci.CellNumber == 1 && contains(ci.Import, "tensorflow") {
+		if ci.CellNumber == 1 && strings.Contains(ci.Import, "tensorflow") {
 			foundTFCell1 = true
 		}
-		if ci.CellNumber == 3 && contains(ci.Import, "torch") {
+		if ci.CellNumber == 3 && strings.Contains(ci.Import, "torch") {
 			foundPyTorchCell3 = true
 		}
 	}
@@ -1002,19 +1003,6 @@ func TestDetectPythonFileNoCellNumber(t *testing.T) {
 			t.Errorf("expected CellNumber=0 for Python file, got %d", fw.CellNumber)
 		}
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || s != "" && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestDetectConcurrent(t *testing.T) {
@@ -1746,7 +1734,7 @@ func TestReadVarint(t *testing.T) {
 	}
 }
 
-func TestMinInt(t *testing.T) {
+func TestMin(t *testing.T) {
 	tests := []struct {
 		a, b, want int
 	}{
@@ -1758,8 +1746,8 @@ func TestMinInt(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := minInt(tt.a, tt.b); got != tt.want {
-			t.Errorf("minInt(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
+		if got := min(tt.a, tt.b); got != tt.want {
+			t.Errorf("min(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
 		}
 	}
 }
@@ -1779,14 +1767,14 @@ func TestBytesEqual(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if result := bytesEqual(tt.a, tt.b); result != tt.expected {
+			if result := bytes.Equal(tt.a, tt.b); result != tt.expected {
 				t.Errorf("expected %v, got %v", tt.expected, result)
 			}
 		})
 	}
 }
 
-func TestCountOccurrences(t *testing.T) {
+func TestStringsCount(t *testing.T) {
 	tests := []struct {
 		s        string
 		substr   string
@@ -1800,9 +1788,9 @@ func TestCountOccurrences(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := countOccurrences(tt.s, tt.substr)
+		result := strings.Count(tt.s, tt.substr)
 		if result != tt.expected {
-			t.Errorf("countOccurrences(%q, %q) = %d, expected %d", tt.s, tt.substr, result, tt.expected)
+			t.Errorf("strings.Count(%q, %q) = %d, expected %d", tt.s, tt.substr, result, tt.expected)
 		}
 	}
 }
