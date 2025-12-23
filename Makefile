@@ -6,13 +6,24 @@ BUILD_DIR=bin
 COVERAGE_FILE=coverage.out
 COVERAGE_THRESHOLD=80
 
+# Version information
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+# Linker flags for version injection
+LDFLAGS = -s -w \
+	-X 'github.com/victoralfred/devsec/internal/cli.Version=$(VERSION)' \
+	-X 'github.com/victoralfred/devsec/internal/cli.GitCommit=$(GIT_COMMIT)' \
+	-X 'github.com/victoralfred/devsec/internal/cli.BuildDate=$(BUILD_DATE)'
+
 all: check build
 
 # Build the binary
 build:
-	@echo "Building $(BINARY_NAME)..."
+	@echo "Building $(BINARY_NAME) $(VERSION)..."
 	@mkdir -p $(BUILD_DIR)
-	go build -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/devsec
+	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/devsec
 
 # Run tests
 test:
