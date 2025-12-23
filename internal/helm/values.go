@@ -2,8 +2,9 @@ package helm
 
 import (
 	"context"
-	"os"
+	"path/filepath"
 
+	"github.com/victoralfred/gowritter/safepath"
 	"helm.sh/helm/v3/pkg/action"
 	"sigs.k8s.io/yaml"
 )
@@ -59,7 +60,16 @@ func (v *defaultValuesClient) LoadFromFile(ctx context.Context, path string) (ma
 		return nil, ErrValuesLoadFailed
 	}
 
-	data, err := os.ReadFile(path) //#nosec G304 -- Path is provided by the caller; input validation is their responsibility.
+	// Use safepath for secure file access.
+	dir := filepath.Dir(path)
+	filename := filepath.Base(path)
+
+	sp, err := safepath.New(dir)
+	if err != nil {
+		return nil, NewHelmError("load values", "", "", ErrValuesLoadFailed)
+	}
+
+	data, err := sp.ReadFile(filename)
 	if err != nil {
 		return nil, NewHelmError("load values", "", "", ErrValuesLoadFailed)
 	}
