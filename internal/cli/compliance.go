@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/victoralfred/devsec/internal/compliance"
 	"github.com/victoralfred/devsec/internal/model"
+	"github.com/victoralfred/devsec/internal/scanner/gitleaks"
+	"github.com/victoralfred/devsec/internal/scanner/osv"
+	"github.com/victoralfred/devsec/internal/scanner/semgrep"
+	"github.com/victoralfred/devsec/internal/scanner/trivy"
 	"github.com/victoralfred/gowritter/safepath"
 )
 
@@ -590,10 +595,99 @@ func loadFindingsFromFile(path string) ([]model.Finding, error) {
 	return findings, nil
 }
 
-func runQuickScan(_ context.Context, _ string) ([]model.Finding, error) {
-	// Placeholder for actual scanning.
-	// In a real implementation, this would run security scanners.
-	return []model.Finding{}, nil
+// scannerResult holds the result from a single scanner.
+// Fields are ordered for optimal memory alignment.
+type scannerResult struct {
+	err      error
+	name     string
+	findings []model.Finding
+}
+
+// runQuickScan runs security scanners concurrently and aggregates findings.
+func runQuickScan(ctx context.Context, path string) ([]model.Finding, error) {
+	// Check context cancellation early.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	var wg sync.WaitGroup
+	results := make(chan scannerResult, 4)
+
+	// Run gitleaks for secret detection.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner, err := gitleaks.New()
+		if err != nil {
+			results <- scannerResult{name: "gitleaks", err: err}
+			return
+		}
+		defer func() { _ = scanner.Close(ctx) }()
+
+		findings, err := scanner.Scan(ctx, path)
+		results <- scannerResult{name: "gitleaks", findings: findings, err: err}
+	}()
+
+	// Run OSV for dependency vulnerabilities.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner := osv.New()
+		defer func() { _ = scanner.Close(ctx) }()
+
+		findings, err := scanner.Scan(ctx, path)
+		results <- scannerResult{name: "osv", findings: findings, err: err}
+	}()
+
+	// Run Semgrep for SAST (if available).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner := semgrep.New()
+		defer func() { _ = scanner.Close(ctx) }()
+
+		findings, err := scanner.Scan(ctx, path)
+		results <- scannerResult{name: "semgrep", findings: findings, err: err}
+	}()
+
+	// Run Trivy for container/filesystem vulnerabilities.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner := trivy.New()
+		defer func() { _ = scanner.Close(ctx) }()
+
+		findings, err := scanner.Scan(ctx, path)
+		results <- scannerResult{name: "trivy", findings: findings, err: err}
+	}()
+
+	// Wait for all scanners to complete.
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Aggregate findings from all scanners.
+	var allFindings []model.Finding
+	var scanErrors []string
+
+	for result := range results {
+		if result.err != nil {
+			// Log scanner errors but continue with other scanners.
+			scanErrors = append(scanErrors, fmt.Sprintf("%s: %v", result.name, result.err))
+			continue
+		}
+		allFindings = append(allFindings, result.findings...)
+	}
+
+	// If all scanners failed, return an error.
+	if len(allFindings) == 0 && len(scanErrors) == len([]string{"gitleaks", "osv", "semgrep", "trivy"}) {
+		return nil, fmt.Errorf("all scanners failed: %s", strings.Join(scanErrors, "; "))
+	}
+
+	return allFindings, nil
 }
 
 func writeComplianceOutput(cmd *cobra.Command, output []byte, outputPath string) error {
