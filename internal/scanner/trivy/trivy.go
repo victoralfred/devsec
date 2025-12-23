@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,8 +16,8 @@ import (
 	"github.com/victoralfred/gowritter/safepath"
 )
 
-// DefaultBinaryPath is the default path to the trivy binary.
-const DefaultBinaryPath = "/usr/bin/trivy"
+// DefaultBinaryName is the default name of the trivy binary.
+const DefaultBinaryName = "trivy"
 
 // DefaultTimeout is the default timeout for trivy execution.
 const DefaultTimeout = 10 * time.Minute
@@ -60,32 +61,41 @@ func WithScanType(scanType string) Option {
 }
 
 // WithExecutor sets a custom executor for command execution.
-func WithExecutor(exec goexec.Executor) Option {
+func WithExecutor(executor goexec.Executor) Option {
 	return func(s *Scanner) {
-		s.executor = exec
+		s.executor = executor
 	}
 }
 
 // New creates a new Trivy scanner.
 func New(opts ...Option) *Scanner {
 	s := &Scanner{
-		binaryPath: DefaultBinaryPath,
-		timeout:    DefaultTimeout,
-		scanType:   "fs", // Default to filesystem scan.
+		timeout:  DefaultTimeout,
+		scanType: "fs", // Default to filesystem scan.
 	}
 
 	for _, opt := range opts {
 		opt(s)
 	}
 
+	// If no binary path specified, look it up in PATH.
+	if s.binaryPath == "" {
+		if path, err := exec.LookPath(DefaultBinaryName); err == nil {
+			s.binaryPath = path
+		} else {
+			// Fallback to name only, will fail at execution time with clear error.
+			s.binaryPath = DefaultBinaryName
+		}
+	}
+
 	if s.executor == nil {
-		exec, err := goexec.New()
+		executor, err := goexec.New()
 		if err != nil {
 			// In case of error, create a minimal scanner.
 			// The Scan method will fail appropriately.
 			return s
 		}
-		s.executor = exec
+		s.executor = executor
 	}
 
 	return s

@@ -27,15 +27,20 @@ type SARIFDriver struct {
 	Rules           []SARIFRule `json:"rules"`
 }
 
+// SARIFDefaultConfiguration represents default configuration for a rule.
+type SARIFDefaultConfiguration struct {
+	Level string `json:"level"`
+}
+
 // SARIFRule represents a rule definition.
 type SARIFRule struct {
-	ID               string          `json:"id"`
-	Name             string          `json:"name"`
-	ShortDescription SARIFMessage    `json:"shortDescription"`
-	FullDescription  SARIFMessage    `json:"fullDescription"`
-	DefaultLevel     string          `json:"defaultConfiguration"`
-	HelpURI          string          `json:"helpUri"`
-	Properties       SARIFProperties `json:"properties"`
+	ShortDescription     SARIFMessage              `json:"shortDescription"`
+	FullDescription      SARIFMessage              `json:"fullDescription"`
+	DefaultConfiguration SARIFDefaultConfiguration `json:"defaultConfiguration"`
+	ID                   string                    `json:"id"`
+	Name                 string                    `json:"name"`
+	HelpURI              string                    `json:"helpUri"`
+	Properties           SARIFProperties           `json:"properties"`
 }
 
 // SARIFResult represents a single finding in the SARIF report.
