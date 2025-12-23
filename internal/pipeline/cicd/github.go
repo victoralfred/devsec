@@ -1,6 +1,7 @@
 package cicd
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -8,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -24,7 +27,9 @@ var (
 )
 
 // GitHubProvider implements the Provider interface for GitHub Actions.
+// Fields are ordered for optimal memory alignment.
 type GitHubProvider struct {
+	client *http.Client
 	config ProviderConfig
 }
 
@@ -52,11 +57,21 @@ func WithGitHubBaseURL(url string) GitHubOption {
 	}
 }
 
+// WithGitHubHTTPClient sets a custom HTTP client.
+func WithGitHubHTTPClient(client *http.Client) GitHubOption {
+	return func(g *GitHubProvider) {
+		g.client = client
+	}
+}
+
 // NewGitHubProvider creates a new GitHub provider.
 func NewGitHubProvider(opts ...GitHubOption) *GitHubProvider {
 	g := &GitHubProvider{
 		config: ProviderConfig{
 			BaseURL: "https://api.github.com",
+		},
+		client: &http.Client{
+			Timeout: 30 * time.Second,
 		},
 	}
 
@@ -265,22 +280,128 @@ func (g *GitHubProvider) parseCreateEvent(body []byte) (*Event, error) {
 	}, nil
 }
 
-// UpdateStatus updates the commit status.
+// githubStatusRequest represents a GitHub commit status API request.
+type githubStatusRequest struct {
+	State       string `json:"state"`
+	TargetURL   string `json:"target_url,omitempty"`
+	Description string `json:"description,omitempty"`
+	Context     string `json:"context,omitempty"`
+}
+
+// UpdateStatus updates the commit status via GitHub API.
 func (g *GitHubProvider) UpdateStatus(ctx context.Context, status RunStatus) error {
 	if ctx == nil {
 		return errors.New("context cannot be nil")
 	}
 
-	// Check context cancellation.
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	// This is a placeholder - actual implementation would make API calls.
-	// Using the GitHub REST or GraphQL API to update commit status.
+	if g.config.Token == "" {
+		return ErrMissingToken
+	}
+
+	// Extract owner/repo and SHA from metadata.
+	repo := status.Metadata["repo"]
+	sha := status.Metadata["sha"]
+	if repo == "" || sha == "" {
+		return errors.New("missing repo or sha in status metadata")
+	}
+
+	// Build the status request.
+	req := githubStatusRequest{
+		State:       mapStatusToGitHubState(status.Status),
+		Description: truncateString(status.Description, 140),
+		TargetURL:   status.URL,
+		Context:     status.PipelineRef,
+	}
+	if req.Context == "" {
+		req.Context = "devsec/pipeline"
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal status request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/repos/%s/statuses/%s", g.config.BaseURL, repo, sha)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Authorization", "Bearer "+g.config.Token)
+	httpReq.Header.Set("Accept", "application/vnd.github+json")
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := g.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
+}
+
+// mapStatusToGitHubState converts internal status to GitHub commit status state.
+func mapStatusToGitHubState(status StatusType) string {
+	switch status {
+	case StatusPending, StatusRunning, StatusInProgress:
+		return "pending"
+	case StatusSuccess:
+		return "success"
+	case StatusFailure, StatusError:
+		return "failure"
+	default:
+		return "pending"
+	}
+}
+
+// truncateString truncates a string to maxLen characters.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
+// githubCheckRunRequest represents a GitHub check run API request.
+type githubCheckRunRequest struct {
+	Name       string                 `json:"name"`
+	HeadSHA    string                 `json:"head_sha"`
+	Status     string                 `json:"status,omitempty"`
+	Conclusion string                 `json:"conclusion,omitempty"`
+	StartedAt  string                 `json:"started_at,omitempty"`
+	Output     *githubCheckRunOutput  `json:"output,omitempty"`
+	Actions    []githubCheckRunAction `json:"actions,omitempty"`
+}
+
+// githubCheckRunOutput represents check run output.
+type githubCheckRunOutput struct {
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+	Text    string `json:"text,omitempty"`
+}
+
+// githubCheckRunAction represents a check run action button.
+type githubCheckRunAction struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Identifier  string `json:"identifier"`
+}
+
+// githubCheckRunResponse represents the GitHub check run API response.
+type githubCheckRunResponse struct {
+	ID int64 `json:"id"`
 }
 
 // CreateCheck creates a GitHub check run.
@@ -293,17 +414,65 @@ func (g *GitHubProvider) CreateCheck(ctx context.Context, event Event, name stri
 		return "", ErrMissingToken
 	}
 
-	// Check context cancellation.
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	default:
 	}
 
-	// This is a placeholder - actual implementation would create a check run via API.
-	// Returns a mock check ID.
-	checkID := fmt.Sprintf("check_%s_%d", name, time.Now().UnixNano())
-	return checkID, nil
+	if event.Repo == "" || event.SHA == "" {
+		return "", errors.New("missing repo or sha in event")
+	}
+
+	req := githubCheckRunRequest{
+		Name:      name,
+		HeadSHA:   event.SHA,
+		Status:    "queued",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal check run request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/repos/%s/check-runs", g.config.BaseURL, event.Repo)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Authorization", "Bearer "+g.config.Token)
+	httpReq.Header.Set("Accept", "application/vnd.github+json")
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := g.client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var checkResp githubCheckRunResponse
+	if err := json.NewDecoder(resp.Body).Decode(&checkResp); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return fmt.Sprintf("%d", checkResp.ID), nil
+}
+
+// githubCheckRunUpdate represents a GitHub check run update request.
+// Fields are ordered for optimal memory alignment.
+type githubCheckRunUpdate struct {
+	Output      *githubCheckRunOutput `json:"output,omitempty"`
+	Status      string                `json:"status,omitempty"`
+	Conclusion  string                `json:"conclusion,omitempty"`
+	CompletedAt string                `json:"completed_at,omitempty"`
 }
 
 // UpdateCheck updates an existing GitHub check run.
@@ -320,14 +489,62 @@ func (g *GitHubProvider) UpdateCheck(ctx context.Context, checkID string, status
 		return ErrMissingCheckDetails
 	}
 
-	// Check context cancellation.
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	// This is a placeholder - actual implementation would update check via API.
+	repo := status.Metadata["repo"]
+	if repo == "" {
+		return errors.New("missing repo in status metadata")
+	}
+
+	req := githubCheckRunUpdate{
+		Status: MapStatusToGitHub(status.Status),
+	}
+
+	// Set conclusion if status is terminal.
+	if status.Status.IsTerminal() {
+		req.Conclusion = MapConclusionToGitHub(status.Status)
+		req.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	// Add output if description is provided.
+	if status.Description != "" {
+		req.Output = &githubCheckRunOutput{
+			Title:   status.PipelineRef,
+			Summary: status.Description,
+		}
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal check run update: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/repos/%s/check-runs/%s", g.config.BaseURL, repo, checkID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Authorization", "Bearer "+g.config.Token)
+	httpReq.Header.Set("Accept", "application/vnd.github+json")
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := g.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
