@@ -83,7 +83,7 @@ func NewWebhookProvider(opts ...WebhookOption) *WebhookProvider {
 		transport := &http.Transport{}
 		if w.config.SkipTLSVerify {
 			transport.TLSClientConfig = &tls.Config{
-				InsecureSkipVerify: true, //nolint:gosec // User explicitly requested to skip TLS verification
+				InsecureSkipVerify: true, //#nosec G402 -- User explicitly requested to skip TLS verification
 			}
 		}
 		w.client = &http.Client{
