@@ -1,0 +1,93 @@
+# Parallel Scanning Pipeline
+# Maximizes throughput by running all scanners in parallel.
+# Best for large codebases where scan time is critical.
+#
+# Usage:
+#   devsec pipeline run examples/pipelines/parallel.yaml . --parallel 4
+#
+# Execution Flow:
+#   ┌──▶ secrets ──────────┐
+#   │                       │
+#   ├──▶ sast ─────────────┼──▶ policy-check ──▶ report
+#   │                       │
+#   ├──▶ vulnerabilities ──┤
+#   │                       │
+#   └──▶ dependencies ─────┘
+
+name: parallel-scanning
+version: "1.0.0"
+description: Maximum parallelism for fast scanning
+timeout: 20m
+
+stages:
+  # All scanners run in parallel
+  - name: secrets
+    kind: scan
+    config:
+      scanner: gitleaks
+    timeout: 5m
+    parallel: true
+
+  - name: sast
+    kind: scan
+    config:
+      scanner: semgrep
+    timeout: 10m
+    parallel: true
+
+  - name: vulnerabilities
+    kind: scan
+    config:
+      scanner: trivy
+    timeout: 8m
+    parallel: true
+
+  - name: dependencies
+    kind: scan
+    config:
+      scanner: osv
+    timeout: 5m
+    parallel: true
+
+  # Policy evaluation after all scans
+  - name: policy-check
+    kind: policy
+    config:
+      fail_on: high
+    depends_on:
+      - secrets
+      - sast
+      - vulnerabilities
+      - dependencies
+    timeout: 3m
+
+  # Generate all report formats in parallel
+  - name: json-report
+    kind: report
+    config:
+      format: json
+      output: ./reports/findings.json
+    depends_on:
+      - policy-check
+    continue_on: always
+    parallel: true
+
+  - name: sarif-report
+    kind: report
+    config:
+      format: sarif
+      output: ./reports/findings.sarif
+    depends_on:
+      - policy-check
+    continue_on: always
+    parallel: true
+
+  - name: markdown-report
+    kind: report
+    config:
+      format: markdown
+      output: ./reports/findings.md
+    depends_on:
+      - policy-check
+    continue_on: always
+    parallel: true

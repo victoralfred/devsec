@@ -1,0 +1,154 @@
+# ML Security Pipeline
+# Security validation pipeline for machine learning projects.
+# Includes model detection, data validation, and fairness analysis.
+#
+# Usage:
+#   devsec pipeline run examples/pipelines/ml-security.yaml ./ml-project
+#
+# Prerequisites:
+#   - ML project with model files (.h5, .pt, .onnx, .pkl, etc.)
+#   - Training data in JSON format
+#   - Optional: Schema files for data validation
+
+name: ml-security-pipeline
+version: "1.0.0"
+description: Security validation for ML projects
+timeout: 45m
+
+stages:
+  # Standard code security scan
+  - name: code-scan
+    kind: scan
+    config:
+      scanner: gitleaks,semgrep
+    timeout: 10m
+
+  # Dependency vulnerabilities (ML libs often have CVEs)
+  - name: dependency-scan
+    kind: scan
+    config:
+      scanner: osv
+    timeout: 5m
+    parallel: true
+
+  # ML framework and model detection
+  - name: ml-detect
+    kind: custom
+    config:
+      command: devsec ml detect . --format json --output ml-detection.json
+    timeout: 5m
+    parallel: true
+
+  # Generate model card documentation
+  - name: model-card
+    kind: custom
+    config:
+      command: |
+        if [ -d "./models" ]; then
+          devsec ml model-card ./models --output model-card.md
+        else
+          echo "No models directory found, skipping model card generation"
+        fi
+    depends_on:
+      - ml-detect
+    timeout: 5m
+    continue_on: always
+
+  # Data schema validation
+  - name: data-validation
+    kind: custom
+    config:
+      command: |
+        if [ -f "./data/training.json" ] && [ -f "./schemas/training-schema.json" ]; then
+          devsec ml validate ./data/training.json --schema ./schemas/training-schema.json
+        else
+          echo "Training data or schema not found, skipping validation"
+        fi
+    depends_on:
+      - ml-detect
+    timeout: 10m
+    continue_on: always
+
+  # Data drift detection (if baseline exists)
+  - name: drift-detection
+    kind: custom
+    config:
+      command: |
+        if [ -f "./data/baseline.json" ] && [ -f "./data/current.json" ]; then
+          devsec ml drift ./data/baseline.json ./data/current.json --threshold 0.1
+        else
+          echo "Baseline/current data not found, skipping drift detection"
+        fi
+    depends_on:
+      - ml-detect
+    timeout: 5m
+    continue_on: always
+    parallel: true
+
+  # Fairness analysis
+  - name: fairness-analysis
+    kind: custom
+    config:
+      command: |
+        if [ -f "./data/predictions.json" ]; then
+          devsec ml fairness ./data/predictions.json --format json --output fairness-report.json
+        else
+          echo "Predictions data not found, skipping fairness analysis"
+        fi
+    depends_on:
+      - ml-detect
+    timeout: 10m
+    continue_on: always
+    parallel: true
+
+  # Bias detection
+  - name: bias-detection
+    kind: custom
+    config:
+      command: |
+        if [ -f "./data/training.json" ]; then
+          devsec ml bias ./data/training.json --format json --output bias-report.json
+        else
+          echo "Training data not found, skipping bias detection"
+        fi
+    depends_on:
+      - ml-detect
+    timeout: 10m
+    continue_on: always
+    parallel: true
+
+  # Policy check for security findings
+  - name: policy
+    kind: policy
+    config:
+      policy_dir: ./policies
+      fail_on: high
+    depends_on:
+      - code-scan
+      - dependency-scan
+    timeout: 3m
+
+  # Compliance mapping
+  - name: compliance
+    kind: compliance
+    config:
+      frameworks: soc2,gdpr
+    depends_on:
+      - policy
+    timeout: 3m
+
+  # Generate comprehensive ML security report
+  - name: report
+    kind: report
+    config:
+      format: markdown
+      output: ./ml-security-report.md
+    depends_on:
+      - compliance
+      - model-card
+      - data-validation
+      - drift-detection
+      - fairness-analysis
+      - bias-detection
+    continue_on: always
+    timeout: 2m

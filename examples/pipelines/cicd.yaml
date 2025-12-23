@@ -1,0 +1,70 @@
+# CI/CD Security Gate Pipeline
+# Fast, fail-fast pipeline optimized for CI/CD integration.
+# Runs parallel scans and fails immediately on critical findings.
+#
+# Usage:
+#   devsec pipeline run examples/pipelines/cicd.yaml .
+#
+# GitHub Actions:
+#   - name: Security Scan
+#     run: devsec pipeline run examples/pipelines/cicd.yaml .
+#
+# GitLab CI:
+#   security:
+#     script:
+#       - devsec pipeline run examples/pipelines/cicd.yaml .
+
+name: ci-security-gate
+version: "1.0.0"
+description: Fast security gate for CI/CD pipelines
+timeout: 15m
+fail_fast: true
+
+stages:
+  # Parallel secret and vulnerability scanning
+  - name: secrets
+    kind: scan
+    config:
+      scanner: gitleaks
+    timeout: 3m
+    parallel: true
+    fail_fast: true
+
+  - name: vulnerabilities
+    kind: scan
+    config:
+      scanner: trivy
+    timeout: 5m
+    parallel: true
+    fail_fast: true
+
+  - name: dependencies
+    kind: scan
+    config:
+      scanner: osv
+    timeout: 3m
+    parallel: true
+
+  # Policy gate (blocks deployment on high/critical)
+  - name: security-gate
+    kind: policy
+    config:
+      policy_dir: ./policies
+      fail_on: high
+    depends_on:
+      - secrets
+      - vulnerabilities
+      - dependencies
+    timeout: 2m
+    fail_fast: true
+
+  # Quick JSON report for CI artifacts
+  - name: ci-report
+    kind: report
+    config:
+      format: json
+      output: ./security-results.json
+    depends_on:
+      - security-gate
+    continue_on: always
+    timeout: 1m

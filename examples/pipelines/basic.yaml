@@ -1,0 +1,17 @@
+# Basic Security Scan Pipeline
+# A minimal pipeline that runs secret detection.
+#
+# Usage:
+#   devsec pipeline run examples/pipelines/basic.yaml .
+
+name: basic-security-scan
+version: "1.0.0"
+description: Minimal security scan for secret detection
+timeout: 10m
+
+stages:
+  - name: secrets
+    kind: scan
+    config:
+      scanner: gitleaks
+    timeout: 5m

@@ -1,0 +1,100 @@
+# Full Security Pipeline
+# Complete pipeline with all security stages: scanning, policy, compliance, and reporting.
+#
+# Usage:
+#   devsec pipeline run examples/pipelines/full.yaml .
+#
+# Execution Flow:
+#   secrets ─────┬──▶ sast ────────────┐
+#                │                      │
+#                ├──▶ vulnerabilities ──┼──▶ policy-check ──▶ compliance ──┬──▶ report
+#                │                      │                                   │
+#                └──▶ dependencies ─────┘                                   └──▶ markdown-report
+
+name: full-security-pipeline
+version: "1.0.0"
+description: Comprehensive security scanning with policy and compliance
+timeout: 45m
+fail_fast: false
+
+stages:
+  # Stage 1: Secret detection (runs first, no dependencies)
+  - name: secrets
+    kind: scan
+    config:
+      scanner: gitleaks
+      path: .
+    timeout: 5m
+
+  # Stage 2: SAST scanning (runs after secrets)
+  - name: sast
+    kind: scan
+    config:
+      scanner: semgrep
+    depends_on:
+      - secrets
+    timeout: 10m
+
+  # Stage 3: Vulnerability scanning (runs after secrets, parallel with sast)
+  - name: vulnerabilities
+    kind: scan
+    config:
+      scanner: trivy
+    depends_on:
+      - secrets
+    timeout: 10m
+    parallel: true
+
+  # Stage 4: Dependency check (runs after secrets, parallel with sast/vuln)
+  - name: dependencies
+    kind: scan
+    config:
+      scanner: osv
+    depends_on:
+      - secrets
+    timeout: 5m
+    parallel: true
+
+  # Stage 5: Policy evaluation (runs after all scans complete)
+  - name: policy-check
+    kind: policy
+    config:
+      policy_dir: ./policies
+      fail_on: high
+    depends_on:
+      - sast
+      - vulnerabilities
+      - dependencies
+    timeout: 5m
+
+  # Stage 6: Compliance mapping (runs after policy check)
+  - name: compliance
+    kind: compliance
+    config:
+      frameworks: soc2,iso27001,gdpr
+    depends_on:
+      - policy-check
+    timeout: 5m
+
+  # Stage 7: Generate SARIF report (runs after compliance, always runs)
+  - name: report
+    kind: report
+    config:
+      format: sarif
+      output: ./reports/security-report.sarif
+    depends_on:
+      - compliance
+    continue_on: always
+    timeout: 2m
+
+  # Stage 8: Generate markdown report (parallel with SARIF)
+  - name: markdown-report
+    kind: report
+    config:
+      format: markdown
+      output: ./reports/security-report.md
+    depends_on:
+      - compliance
+    continue_on: always
+    timeout: 2m
+    parallel: true
