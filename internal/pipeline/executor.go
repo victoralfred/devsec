@@ -5,14 +5,17 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/victoralfred/devsec/internal/progress"
 )
 
 // ExecuteOptions configures pipeline execution.
 type ExecuteOptions struct {
-	WorkDir     string
-	MaxParallel int
-	DryRun      bool
-	Verbose     bool
+	ProgressReporter progress.Reporter
+	WorkDir          string
+	MaxParallel      int
+	DryRun           bool
+	Verbose          bool
 }
 
 // DefaultExecuteOptions returns default execution options.
@@ -295,18 +298,33 @@ func (e *DefaultExecutor) executeStage(
 	opts ExecuteOptions,
 	completed map[string]StageResult,
 ) (StageResult, error) {
+	startTime := time.Now()
+
+	// Report stage started.
+	if opts.ProgressReporter != nil {
+		opts.ProgressReporter.ReportStageStarted(stage.Name)
+	}
+
 	// Create stage-level timeout context.
 	stageCtx, stageCancel := context.WithTimeout(ctx, stage.GetTimeout())
 	defer stageCancel()
 
 	// Check for dry run.
 	if opts.DryRun {
-		return StageResult{
+		result := StageResult{
 			Name:      stage.Name,
 			Status:    StageStatusSkipped,
-			StartTime: time.Now(),
+			StartTime: startTime,
 			EndTime:   time.Now(),
-		}, nil
+		}
+		if opts.ProgressReporter != nil {
+			opts.ProgressReporter.ReportStageCompleted(
+				stage.Name,
+				progress.StatusSkipped,
+				result.EndTime.Sub(startTime),
+			)
+		}
+		return result, nil
 	}
 
 	// Get runner.
@@ -315,23 +333,45 @@ func (e *DefaultExecutor) executeStage(
 	e.mu.RUnlock()
 
 	if !ok {
-		return StageResult{
+		result := StageResult{
 			Name:      stage.Name,
 			Status:    StageStatusFailed,
 			Error:     "no runner for stage kind: " + string(stage.Kind),
-			StartTime: time.Now(),
+			StartTime: startTime,
 			EndTime:   time.Now(),
-		}, ErrNoRunner
+		}
+		if opts.ProgressReporter != nil {
+			opts.ProgressReporter.ReportStageCompleted(
+				stage.Name,
+				progress.StatusFailed,
+				result.EndTime.Sub(startTime),
+			)
+		}
+		return result, ErrNoRunner
 	}
 
 	// Build input.
 	input := RunnerInput{
-		WorkDir:         opts.WorkDir,
-		PreviousResults: completed,
+		WorkDir:          opts.WorkDir,
+		PreviousResults:  completed,
+		ProgressReporter: opts.ProgressReporter,
 	}
 
 	// Execute stage.
-	return runner.Run(stageCtx, stage, input)
+	result, err := runner.Run(stageCtx, stage, input)
+
+	// Report stage completed.
+	if opts.ProgressReporter != nil {
+		status := progress.StatusSuccess
+		if err != nil || result.Status == StageStatusFailed {
+			status = progress.StatusFailed
+		} else if result.Status == StageStatusSkipped {
+			status = progress.StatusSkipped
+		}
+		opts.ProgressReporter.ReportStageCompleted(stage.Name, status, result.Duration)
+	}
+
+	return result, err
 }
 
 // topologicalSort returns stages in execution order.

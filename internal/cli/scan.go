@@ -11,10 +11,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/victoralfred/devsec/internal/model"
+	"github.com/victoralfred/devsec/internal/progress"
 	"github.com/victoralfred/devsec/internal/scanner/gitleaks"
 	"github.com/victoralfred/devsec/internal/scanner/osv"
 	"github.com/victoralfred/devsec/internal/scanner/semgrep"
 	"github.com/victoralfred/devsec/internal/scanner/trivy"
+	"github.com/victoralfred/devsec/internal/tui"
 	"github.com/victoralfred/gowritter/safepath"
 )
 
@@ -98,6 +100,11 @@ func runScanSecrets(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
+	// Check if TUI progress is enabled.
+	if IsProgressEnabled() {
+		return runScanWithTUI(ctx, cmd, "secrets", absPath, scanner, outputResults, ErrSecretsFound)
+	}
 
 	if verbose {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Scanning %s for secrets...\n", absPath)
@@ -262,6 +269,11 @@ func runScanSast(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	// Check if TUI progress is enabled.
+	if IsProgressEnabled() {
+		return runScanWithTUI(ctx, cmd, "sast", absPath, scanner, outputResults, ErrVulnerabilitiesFound)
+	}
+
 	if verbose {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Scanning %s for vulnerabilities...\n", absPath)
 	}
@@ -331,6 +343,11 @@ func runScanVulnerabilities(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
+	// Check if TUI progress is enabled.
+	if IsProgressEnabled() {
+		return runScanWithTUI(ctx, cmd, "vulnerabilities", absPath, scanner, outputVulnerabilityResults, ErrVulnerabilitiesFound)
+	}
 
 	if verbose {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Scanning %s for dependency vulnerabilities...\n", absPath)
@@ -458,6 +475,11 @@ func runScanDependencies(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	// Check if TUI progress is enabled.
+	if IsProgressEnabled() {
+		return runScanWithTUI(ctx, cmd, "dependencies", absPath, scanner, outputDependencyResults, ErrVulnerabilitiesFound)
+	}
+
 	if verbose {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Scanning %s for dependency vulnerabilities...\n", absPath)
 	}
@@ -531,4 +553,119 @@ func outputDependencyText(cmd *cobra.Command, findings []model.Finding) error {
 	}
 
 	return nil
+}
+
+// Scanner is an interface for security scanners.
+type Scanner interface {
+	Scan(ctx context.Context, path string) ([]model.Finding, error)
+	Close(ctx context.Context) error
+}
+
+// runScanWithTUI executes a scan with TUI progress display.
+func runScanWithTUI(
+	ctx context.Context,
+	cmd *cobra.Command,
+	scannerName string,
+	absPath string,
+	scanner Scanner,
+	outputFn func(*cobra.Command, []model.Finding) error,
+	errType error,
+) error {
+	// Create channel reporter for progress events.
+	reporter, events := progress.NewChannelReporter(100)
+
+	// Create TUI model for single stage scan.
+	tuiModel := tui.NewModel(tui.Config{
+		CommandName: scannerName,
+		CommandType: tui.CommandTypeScan,
+		Events:      events,
+		Stages:      []string{scannerName},
+	})
+
+	// Get terminal size.
+	width, height, err := tui.GetTerminalSize()
+	if err != nil {
+		width, height = 80, 24
+	}
+	tuiModel.SetSize(width, height)
+
+	// Result channel.
+	type scanResult struct {
+		err      error
+		findings []model.Finding
+	}
+	resultChan := make(chan scanResult, 1)
+
+	// Execute scan in background.
+	go func() {
+		reporter.ReportStageStarted(scannerName)
+
+		startTime := time.Now()
+		findings, scanErr := scanner.Scan(ctx, absPath)
+		duration := time.Since(startTime)
+
+		// Report finding counts.
+		if len(findings) > 0 {
+			count := countScanFindings(findings)
+			reporter.ReportFindingCount(count)
+		}
+
+		// Report completion.
+		status := progress.StatusSuccess
+		if scanErr != nil {
+			status = progress.StatusFailed
+		}
+		reporter.ReportStageCompleted(scannerName, status, duration)
+		reporter.ReportCompleted(findings, scanErr)
+		reporter.Close()
+
+		resultChan <- scanResult{findings: findings, err: scanErr}
+	}()
+
+	// Run TUI.
+	if tuiErr := tui.Run(tuiModel); tuiErr != nil {
+		res := <-resultChan
+		if res.err != nil {
+			return fmt.Errorf("scan failed: %w", res.err)
+		}
+		return fmt.Errorf("TUI error: %w", tuiErr)
+	}
+
+	// Get scan result.
+	res := <-resultChan
+
+	if res.err != nil {
+		return fmt.Errorf("scan failed: %w", res.err)
+	}
+
+	// Output results after TUI exits.
+	if err := outputFn(cmd, res.findings); err != nil {
+		return fmt.Errorf("failed to output results: %w", err)
+	}
+
+	if len(res.findings) > 0 {
+		return errType
+	}
+
+	return nil
+}
+
+// countScanFindings counts findings by severity.
+func countScanFindings(findings []model.Finding) progress.FindingCount {
+	var count progress.FindingCount
+	for i := range findings {
+		switch findings[i].Severity {
+		case model.SeverityCritical:
+			count.Critical++
+		case model.SeverityHigh:
+			count.High++
+		case model.SeverityMedium:
+			count.Medium++
+		case model.SeverityLow:
+			count.Low++
+		default:
+			count.Info++
+		}
+	}
+	return count
 }

@@ -118,11 +118,12 @@ func TestExecutor_Execute(t *testing.T) {
 	t.Run("simple pipeline", func(t *testing.T) {
 		t.Parallel()
 		ctx := context.Background()
+		// Use report and compliance stages which don't require external binaries.
 		p := Pipeline{
 			Name: "test",
 			Stages: []Stage{
-				{Name: "scan", Kind: StageKindScan, Config: map[string]string{"scanner": "gitleaks"}},
-				{Name: "policy", Kind: StageKindPolicy, DependsOn: []string{"scan"}},
+				{Name: "report", Kind: StageKindReport, Config: map[string]string{"format": "json"}},
+				{Name: "compliance", Kind: StageKindCompliance, Config: map[string]string{"frameworks": "soc2"}, DependsOn: []string{"report"}},
 			},
 		}
 		result, err := e.Execute(ctx, p, DefaultExecuteOptions())
@@ -143,13 +144,14 @@ func TestExecutor_Execute(t *testing.T) {
 	t.Run("parallel pipeline", func(t *testing.T) {
 		t.Parallel()
 		ctx := context.Background()
+		// Use report and compliance stages which don't require external binaries.
 		p := Pipeline{
 			Name:     "test",
 			Parallel: true,
 			Stages: []Stage{
-				{Name: "scan1", Kind: StageKindScan, Config: map[string]string{"scanner": "gitleaks"}},
-				{Name: "scan2", Kind: StageKindScan, Config: map[string]string{"scanner": "semgrep"}},
-				{Name: "policy", Kind: StageKindPolicy, DependsOn: []string{"scan1", "scan2"}},
+				{Name: "report1", Kind: StageKindReport, Config: map[string]string{"format": "json"}},
+				{Name: "report2", Kind: StageKindReport, Config: map[string]string{"format": "sarif"}},
+				{Name: "compliance", Kind: StageKindCompliance, Config: map[string]string{"frameworks": "soc2"}, DependsOn: []string{"report1", "report2"}},
 			},
 		}
 		opts := DefaultExecuteOptions()

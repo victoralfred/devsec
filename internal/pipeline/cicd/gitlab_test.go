@@ -3,6 +3,9 @@ package cicd
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -351,6 +354,41 @@ func TestGitLabProvider_ParseEvent_LowercaseHeaders(t *testing.T) {
 }
 
 func TestGitLabProvider_UpdateStatus(t *testing.T) {
+	// Create a mock server.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if !strings.Contains(r.URL.Path, "/statuses/") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"status": "success"}`))
+	}))
+	defer server.Close()
+
+	g := NewGitLabProvider(
+		WithGitLabToken("test-token"),
+		WithGitLabBaseURL(server.URL),
+	)
+
+	ctx := context.Background()
+	status := RunStatus{
+		RunID:  "run123",
+		Status: StatusSuccess,
+		Metadata: map[string]string{
+			"project": "group/project",
+			"sha":     "abc123",
+		},
+	}
+
+	err := g.UpdateStatus(ctx, status)
+	if err != nil {
+		t.Errorf("UpdateStatus() error = %v", err)
+	}
+}
+
+func TestGitLabProvider_UpdateStatus_MissingToken(t *testing.T) {
 	g := NewGitLabProvider()
 
 	ctx := context.Background()
@@ -360,8 +398,23 @@ func TestGitLabProvider_UpdateStatus(t *testing.T) {
 	}
 
 	err := g.UpdateStatus(ctx, status)
-	if err != nil {
-		t.Errorf("UpdateStatus() error = %v", err)
+	if err != ErrMissingToken {
+		t.Errorf("UpdateStatus() error = %v, want %v", err, ErrMissingToken)
+	}
+}
+
+func TestGitLabProvider_UpdateStatus_MissingMetadata(t *testing.T) {
+	g := NewGitLabProvider(WithGitLabToken("test-token"))
+
+	ctx := context.Background()
+	status := RunStatus{
+		RunID:  "run123",
+		Status: StatusSuccess,
+	}
+
+	err := g.UpdateStatus(ctx, status)
+	if err == nil {
+		t.Error("UpdateStatus() expected error for missing metadata")
 	}
 }
 
@@ -376,7 +429,23 @@ func TestGitLabProvider_UpdateStatus_NilContext(t *testing.T) {
 }
 
 func TestGitLabProvider_CreateCheck(t *testing.T) {
-	g := NewGitLabProvider(WithGitLabToken("token"))
+	// Create a mock server.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if !strings.Contains(r.URL.Path, "/statuses/") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"status": "pending"}`))
+	}))
+	defer server.Close()
+
+	g := NewGitLabProvider(
+		WithGitLabToken("test-token"),
+		WithGitLabBaseURL(server.URL),
+	)
 
 	ctx := context.Background()
 	event := Event{
@@ -388,8 +457,8 @@ func TestGitLabProvider_CreateCheck(t *testing.T) {
 	if err != nil {
 		t.Errorf("CreateCheck() error = %v", err)
 	}
-	if checkID == "" {
-		t.Error("CreateCheck() returned empty check ID")
+	if checkID != "security-scan" {
+		t.Errorf("CreateCheck() returned %s, want security-scan", checkID)
 	}
 }
 
@@ -406,7 +475,41 @@ func TestGitLabProvider_CreateCheck_MissingToken(t *testing.T) {
 }
 
 func TestGitLabProvider_UpdateCheck(t *testing.T) {
-	g := NewGitLabProvider(WithGitLabToken("token"))
+	// Create a mock server.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if !strings.Contains(r.URL.Path, "/statuses/") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"status": "success"}`))
+	}))
+	defer server.Close()
+
+	g := NewGitLabProvider(
+		WithGitLabToken("test-token"),
+		WithGitLabBaseURL(server.URL),
+	)
+
+	ctx := context.Background()
+	status := RunStatus{
+		Status: StatusSuccess,
+		Metadata: map[string]string{
+			"project": "group/project",
+			"sha":     "abc123",
+		},
+	}
+
+	err := g.UpdateCheck(ctx, "status123", status)
+	if err != nil {
+		t.Errorf("UpdateCheck() error = %v", err)
+	}
+}
+
+func TestGitLabProvider_UpdateCheck_MissingMetadata(t *testing.T) {
+	g := NewGitLabProvider(WithGitLabToken("test-token"))
 
 	ctx := context.Background()
 	status := RunStatus{
@@ -414,8 +517,8 @@ func TestGitLabProvider_UpdateCheck(t *testing.T) {
 	}
 
 	err := g.UpdateCheck(ctx, "status123", status)
-	if err != nil {
-		t.Errorf("UpdateCheck() error = %v", err)
+	if err == nil {
+		t.Error("UpdateCheck() expected error for missing metadata")
 	}
 }
 

@@ -3,6 +3,7 @@ package cicd
 
 import (
 	"context"
+	"os"
 	"time"
 )
 
@@ -156,9 +157,29 @@ func (c *ProviderConfig) Validate() error {
 }
 
 // DetectProvider attempts to detect the CI/CD provider from environment.
+// It checks for CI/CD-specific environment variables in order of priority.
 func DetectProvider() ProviderType {
-	// Detection logic would check for CI/CD-specific environment variables.
-	// This is a placeholder - actual implementation would check env vars.
+	// GitHub Actions sets GITHUB_ACTIONS=true
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		return ProviderGitHub
+	}
+
+	// GitLab CI sets GITLAB_CI=true
+	if os.Getenv("GITLAB_CI") == "true" {
+		return ProviderGitLab
+	}
+
+	// Alternative GitHub detection via GITHUB_RUN_ID
+	if os.Getenv("GITHUB_RUN_ID") != "" {
+		return ProviderGitHub
+	}
+
+	// Alternative GitLab detection via CI_PROJECT_ID
+	if os.Getenv("CI_PROJECT_ID") != "" {
+		return ProviderGitLab
+	}
+
+	// Default to webhook for unknown or custom CI systems
 	return ProviderWebhook
 }
 

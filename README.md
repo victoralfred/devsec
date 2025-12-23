@@ -66,6 +66,8 @@ devsec pipeline run
 
 For detailed installation instructions, see [SETUP.md](SETUP.md).
 
+For CI/CD integration and webhook configuration, see [WEBHOOKS.md](WEBHOOKS.md).
+
 ## CLI Reference
 
 ### Root Commands
@@ -258,6 +260,22 @@ stages:
     depends_on: [compliance]
     continue_on: always
 ```
+
+### Example Pipelines
+
+Ready-to-use pipeline configurations are available in [`examples/pipelines/`](examples/pipelines/):
+
+| Pipeline | Description |
+|----------|-------------|
+| [basic.yaml](examples/pipelines/basic.yaml) | Minimal secret detection |
+| [full.yaml](examples/pipelines/full.yaml) | Complete security pipeline |
+| [cicd.yaml](examples/pipelines/cicd.yaml) | Fast CI/CD integration |
+| [parallel.yaml](examples/pipelines/parallel.yaml) | Maximum parallelism |
+| [compliance-audit.yaml](examples/pipelines/compliance-audit.yaml) | Compliance evidence |
+| [custom.yaml](examples/pipelines/custom.yaml) | Custom integrations |
+| [ml-security.yaml](examples/pipelines/ml-security.yaml) | ML project security |
+
+Example policies are in [`examples/policies/`](examples/policies/).
 
 ## Use Cases
 

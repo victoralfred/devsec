@@ -1,0 +1,96 @@
+# Compliance Audit Pipeline
+# Generates compliance evidence for SOC2, ISO 27001, and GDPR audits.
+# Creates separate reports per framework for auditor review.
+#
+# Usage:
+#   devsec pipeline run examples/pipelines/compliance-audit.yaml .
+#
+# Output:
+#   ./audit/soc2-evidence.md
+#   ./audit/iso27001-evidence.md
+#   ./audit/gdpr-evidence.md
+#   ./audit/findings.sarif
+
+name: compliance-audit
+version: "1.0.0"
+description: Generate compliance evidence for auditors
+timeout: 60m
+
+stages:
+  # Comprehensive scanning with all scanners
+  - name: full-scan
+    kind: scan
+    config:
+      scanner: gitleaks,semgrep,trivy,osv
+    timeout: 20m
+
+  # Compliance assessment for multiple frameworks (parallel)
+  - name: soc2-assessment
+    kind: compliance
+    config:
+      frameworks: soc2
+    depends_on:
+      - full-scan
+    timeout: 5m
+
+  - name: iso27001-assessment
+    kind: compliance
+    config:
+      frameworks: iso27001
+    depends_on:
+      - full-scan
+    timeout: 5m
+    parallel: true
+
+  - name: gdpr-assessment
+    kind: compliance
+    config:
+      frameworks: gdpr
+    depends_on:
+      - full-scan
+    timeout: 5m
+    parallel: true
+
+  # Generate evidence reports (parallel)
+  - name: soc2-report
+    kind: report
+    config:
+      format: markdown
+      output: ./audit/soc2-evidence.md
+    depends_on:
+      - soc2-assessment
+    continue_on: always
+    timeout: 2m
+
+  - name: iso27001-report
+    kind: report
+    config:
+      format: markdown
+      output: ./audit/iso27001-evidence.md
+    depends_on:
+      - iso27001-assessment
+    continue_on: always
+    timeout: 2m
+    parallel: true
+
+  - name: gdpr-report
+    kind: report
+    config:
+      format: markdown
+      output: ./audit/gdpr-evidence.md
+    depends_on:
+      - gdpr-assessment
+    continue_on: always
+    timeout: 2m
+    parallel: true
+
+  # Combined SARIF for tooling integration
+  - name: sarif-export
+    kind: report
+    config:
+      format: sarif
+      output: ./audit/findings.sarif
+    depends_on:
+      - full-scan
+    continue_on: always
+    timeout: 2m

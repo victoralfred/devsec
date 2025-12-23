@@ -1,0 +1,104 @@
+# Custom Integration Pipeline
+# Demonstrates custom stage usage for notifications, scripts, and external tools.
+#
+# Usage:
+#   devsec pipeline run examples/pipelines/custom.yaml .
+#
+# Environment Variables:
+#   SLACK_WEBHOOK_URL - Slack webhook for notifications
+#
+# Note: Custom stages use goexec for sandboxed command execution.
+
+name: custom-integration
+version: "1.0.0"
+description: Pipeline with custom integrations and notifications
+timeout: 30m
+
+stages:
+  # Standard security scanning
+  - name: scan
+    kind: scan
+    config:
+      scanner: gitleaks,trivy
+    timeout: 10m
+
+  # Policy evaluation
+  - name: policy
+    kind: policy
+    config:
+      fail_on: critical
+    depends_on:
+      - scan
+    timeout: 3m
+
+  # Custom: Pre-scan setup script
+  - name: setup
+    kind: custom
+    config:
+      command: echo "Starting security scan at $(date)"
+    timeout: 10s
+
+  # Custom: Run additional security tool
+  - name: custom-scanner
+    kind: custom
+    config:
+      command: |
+        if command -v bandit &> /dev/null; then
+          bandit -r . -f json -o bandit-results.json || true
+        else
+          echo "Bandit not installed, skipping"
+        fi
+    depends_on:
+      - setup
+    timeout: 5m
+    parallel: true
+
+  # Custom: Check for sensitive files
+  - name: sensitive-files-check
+    kind: custom
+    config:
+      command: |
+        echo "Checking for sensitive files..."
+        find . -name "*.pem" -o -name "*.key" -o -name ".env" 2>/dev/null | head -20
+    depends_on:
+      - setup
+    timeout: 30s
+    parallel: true
+
+  # Generate report
+  - name: report
+    kind: report
+    config:
+      format: json
+      output: ./security-report.json
+    depends_on:
+      - policy
+    continue_on: always
+
+  # Custom: Send notification (always runs)
+  - name: notify
+    kind: custom
+    config:
+      command: |
+        echo "Security scan completed"
+        if [ -n "$SLACK_WEBHOOK_URL" ]; then
+          curl -s -X POST -H 'Content-type: application/json' \
+            --data '{"text":"Security scan completed for '"$PWD"'"}' \
+            "$SLACK_WEBHOOK_URL" || true
+        fi
+    depends_on:
+      - report
+    continue_on: always
+    timeout: 30s
+
+  # Custom: Cleanup temporary files
+  - name: cleanup
+    kind: custom
+    config:
+      command: |
+        rm -f bandit-results.json 2>/dev/null || true
+        echo "Cleanup completed"
+    depends_on:
+      - notify
+    continue_on: always
+    timeout: 10s

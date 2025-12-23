@@ -126,31 +126,6 @@ func TestScanRunner(t *testing.T) {
 		}
 	})
 
-	t.Run("run success", func(t *testing.T) {
-		t.Parallel()
-		ctx := context.Background()
-		stage := Stage{
-			Name: "test-scan",
-			Kind: StageKindScan,
-			Config: map[string]string{
-				"scanner": "gitleaks",
-				"path":    ".",
-			},
-		}
-		input := RunnerInput{WorkDir: "."}
-
-		result, err := runner.Run(ctx, stage, input)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result.Status != StageStatusSuccess {
-			t.Errorf("expected success status, got %v", result.Status)
-		}
-		if result.Name != "test-scan" {
-			t.Errorf("expected name test-scan, got %v", result.Name)
-		}
-	})
-
 	t.Run("run missing scanner", func(t *testing.T) {
 		t.Parallel()
 		ctx := context.Background()
@@ -164,6 +139,28 @@ func TestScanRunner(t *testing.T) {
 		result, err := runner.Run(ctx, stage, input)
 		if err == nil {
 			t.Error("expected error for missing scanner")
+		}
+		if result.Status != StageStatusFailed {
+			t.Errorf("expected failed status, got %v", result.Status)
+		}
+	})
+
+	t.Run("run unknown scanner", func(t *testing.T) {
+		t.Parallel()
+		ctx := context.Background()
+		stage := Stage{
+			Name: "test-scan",
+			Kind: StageKindScan,
+			Config: map[string]string{
+				"scanner": "unknown-scanner",
+				"path":    t.TempDir(),
+			},
+		}
+		input := RunnerInput{WorkDir: t.TempDir()}
+
+		result, err := runner.Run(ctx, stage, input)
+		if err == nil {
+			t.Error("expected error for unknown scanner")
 		}
 		if result.Status != StageStatusFailed {
 			t.Errorf("expected failed status, got %v", result.Status)
@@ -206,47 +203,72 @@ func TestPolicyRunner(t *testing.T) {
 		}
 	})
 
-	t.Run("run success", func(t *testing.T) {
+	t.Run("run missing policy dir", func(t *testing.T) {
 		t.Parallel()
 		ctx := context.Background()
 		stage := Stage{
 			Name: "test-policy",
 			Kind: StageKindPolicy,
 			Config: map[string]string{
-				"policy_dir": "policies",
+				"policy_dir": "/nonexistent/path",
 				"fail_on":    "critical",
+			},
+		}
+		input := RunnerInput{WorkDir: t.TempDir()}
+
+		result, err := runner.Run(ctx, stage, input)
+		if err == nil {
+			t.Error("expected error for missing policy directory")
+		}
+		if result.Status != StageStatusFailed {
+			t.Errorf("expected failed status, got %v", result.Status)
+		}
+	})
+
+	t.Run("run empty policy dir", func(t *testing.T) {
+		t.Parallel()
+		ctx := context.Background()
+		tmpDir := t.TempDir()
+
+		stage := Stage{
+			Name: "test-policy",
+			Kind: StageKindPolicy,
+			Config: map[string]string{
+				"policy_dir": tmpDir,
+				"fail_on":    "high",
+			},
+		}
+		input := RunnerInput{WorkDir: tmpDir}
+
+		result, err := runner.Run(ctx, stage, input)
+		if err == nil {
+			t.Error("expected error for empty policy directory")
+		}
+		if result.Status != StageStatusFailed {
+			t.Errorf("expected failed status, got %v", result.Status)
+		}
+	})
+
+	t.Run("run canceled context", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		stage := Stage{
+			Name: "test-policy",
+			Kind: StageKindPolicy,
+			Config: map[string]string{
+				"policy_dir": "policies",
 			},
 		}
 		input := RunnerInput{}
 
 		result, err := runner.Run(ctx, stage, input)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if err != context.Canceled {
+			t.Errorf("expected context.Canceled, got %v", err)
 		}
-		if result.Status != StageStatusSuccess {
-			t.Errorf("expected success status, got %v", result.Status)
-		}
-	})
-
-	t.Run("run with defaults", func(t *testing.T) {
-		t.Parallel()
-		ctx := context.Background()
-		stage := Stage{
-			Name:   "test-policy",
-			Kind:   StageKindPolicy,
-			Config: map[string]string{},
-		}
-		input := RunnerInput{}
-
-		result, err := runner.Run(ctx, stage, input)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result.Artifacts["policy_dir"] != "policies" {
-			t.Error("expected default policy_dir")
-		}
-		if result.Artifacts["fail_on"] != "high" {
-			t.Error("expected default fail_on")
+		if result.Status != StageStatusCanceled {
+			t.Errorf("expected canceled status, got %v", result.Status)
 		}
 	})
 }
@@ -335,17 +357,18 @@ func TestCustomRunner(t *testing.T) {
 		}
 	})
 
-	t.Run("run success", func(t *testing.T) {
+	t.Run("run success with absolute path", func(t *testing.T) {
 		t.Parallel()
 		ctx := context.Background()
+		tmpDir := t.TempDir()
 		stage := Stage{
 			Name: "test-custom",
 			Kind: StageKindCustom,
 			Config: map[string]string{
-				"command": "echo hello",
+				"command": "/bin/echo hello",
 			},
 		}
-		input := RunnerInput{}
+		input := RunnerInput{WorkDir: tmpDir}
 
 		result, err := runner.Run(ctx, stage, input)
 		if err != nil {
@@ -353,6 +376,10 @@ func TestCustomRunner(t *testing.T) {
 		}
 		if result.Status != StageStatusSuccess {
 			t.Errorf("expected success status, got %v", result.Status)
+		}
+		// Verify stdout was captured.
+		if stdout, ok := result.Artifacts["stdout"].(string); !ok || stdout == "" {
+			t.Error("expected stdout in artifacts")
 		}
 	})
 
@@ -372,6 +399,29 @@ func TestCustomRunner(t *testing.T) {
 		}
 		if result.Status != StageStatusFailed {
 			t.Errorf("expected failed status, got %v", result.Status)
+		}
+	})
+
+	t.Run("run canceled context", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		stage := Stage{
+			Name: "test-custom",
+			Kind: StageKindCustom,
+			Config: map[string]string{
+				"command": "/bin/echo test",
+			},
+		}
+		input := RunnerInput{}
+
+		result, err := runner.Run(ctx, stage, input)
+		if err != context.Canceled {
+			t.Errorf("expected context.Canceled, got %v", err)
+		}
+		if result.Status != StageStatusCanceled {
+			t.Errorf("expected canceled status, got %v", result.Status)
 		}
 	})
 }

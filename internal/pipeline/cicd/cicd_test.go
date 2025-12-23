@@ -1,6 +1,7 @@
 package cicd
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -204,6 +205,23 @@ func TestDefaultProviderConfig(t *testing.T) {
 }
 
 func TestDetectProvider(t *testing.T) {
+	// Save and clear CI environment variables.
+	envVars := []string{"GITHUB_ACTIONS", "GITLAB_CI", "GITHUB_RUN_ID", "CI_PROJECT_ID"}
+	saved := make(map[string]string)
+	for _, env := range envVars {
+		saved[env] = os.Getenv(env)
+		if err := os.Unsetenv(env); err != nil {
+			t.Fatalf("failed to unset %s: %v", env, err)
+		}
+	}
+	defer func() {
+		for env, val := range saved {
+			if val != "" {
+				_ = os.Setenv(env, val)
+			}
+		}
+	}()
+
 	// Default detection returns webhook.
 	provider := DetectProvider()
 	if provider != ProviderWebhook {

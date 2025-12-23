@@ -6,6 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -293,6 +296,41 @@ func TestGitHubProvider_ParseEvent_CanceledContext(t *testing.T) {
 }
 
 func TestGitHubProvider_UpdateStatus(t *testing.T) {
+	// Create a mock server.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if !strings.Contains(r.URL.Path, "/statuses/") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"state": "success"}`))
+	}))
+	defer server.Close()
+
+	g := NewGitHubProvider(
+		WithGitHubToken("test-token"),
+		WithGitHubBaseURL(server.URL),
+	)
+
+	ctx := context.Background()
+	status := RunStatus{
+		RunID:  "run123",
+		Status: StatusSuccess,
+		Metadata: map[string]string{
+			"repo": "owner/repo",
+			"sha":  "abc123",
+		},
+	}
+
+	err := g.UpdateStatus(ctx, status)
+	if err != nil {
+		t.Errorf("UpdateStatus() error = %v", err)
+	}
+}
+
+func TestGitHubProvider_UpdateStatus_MissingToken(t *testing.T) {
 	g := NewGitHubProvider()
 
 	ctx := context.Background()
@@ -302,8 +340,23 @@ func TestGitHubProvider_UpdateStatus(t *testing.T) {
 	}
 
 	err := g.UpdateStatus(ctx, status)
-	if err != nil {
-		t.Errorf("UpdateStatus() error = %v", err)
+	if err != ErrMissingToken {
+		t.Errorf("UpdateStatus() error = %v, want %v", err, ErrMissingToken)
+	}
+}
+
+func TestGitHubProvider_UpdateStatus_MissingMetadata(t *testing.T) {
+	g := NewGitHubProvider(WithGitHubToken("test-token"))
+
+	ctx := context.Background()
+	status := RunStatus{
+		RunID:  "run123",
+		Status: StatusSuccess,
+	}
+
+	err := g.UpdateStatus(ctx, status)
+	if err == nil {
+		t.Error("UpdateStatus() expected error for missing metadata")
 	}
 }
 
@@ -318,7 +371,23 @@ func TestGitHubProvider_UpdateStatus_NilContext(t *testing.T) {
 }
 
 func TestGitHubProvider_CreateCheck(t *testing.T) {
-	g := NewGitHubProvider(WithGitHubToken("token"))
+	// Create a mock server.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if !strings.Contains(r.URL.Path, "/check-runs") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id": 12345}`))
+	}))
+	defer server.Close()
+
+	g := NewGitHubProvider(
+		WithGitHubToken("test-token"),
+		WithGitHubBaseURL(server.URL),
+	)
 
 	ctx := context.Background()
 	event := Event{
@@ -330,8 +399,8 @@ func TestGitHubProvider_CreateCheck(t *testing.T) {
 	if err != nil {
 		t.Errorf("CreateCheck() error = %v", err)
 	}
-	if checkID == "" {
-		t.Error("CreateCheck() returned empty check ID")
+	if checkID != "12345" {
+		t.Errorf("CreateCheck() returned %s, want 12345", checkID)
 	}
 }
 
@@ -348,7 +417,40 @@ func TestGitHubProvider_CreateCheck_MissingToken(t *testing.T) {
 }
 
 func TestGitHubProvider_UpdateCheck(t *testing.T) {
-	g := NewGitHubProvider(WithGitHubToken("token"))
+	// Create a mock server.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Errorf("expected PATCH, got %s", r.Method)
+		}
+		if !strings.Contains(r.URL.Path, "/check-runs/") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id": 12345}`))
+	}))
+	defer server.Close()
+
+	g := NewGitHubProvider(
+		WithGitHubToken("test-token"),
+		WithGitHubBaseURL(server.URL),
+	)
+
+	ctx := context.Background()
+	status := RunStatus{
+		Status: StatusSuccess,
+		Metadata: map[string]string{
+			"repo": "owner/repo",
+		},
+	}
+
+	err := g.UpdateCheck(ctx, "12345", status)
+	if err != nil {
+		t.Errorf("UpdateCheck() error = %v", err)
+	}
+}
+
+func TestGitHubProvider_UpdateCheck_MissingRepo(t *testing.T) {
+	g := NewGitHubProvider(WithGitHubToken("test-token"))
 
 	ctx := context.Background()
 	status := RunStatus{
@@ -356,8 +458,8 @@ func TestGitHubProvider_UpdateCheck(t *testing.T) {
 	}
 
 	err := g.UpdateCheck(ctx, "check123", status)
-	if err != nil {
-		t.Errorf("UpdateCheck() error = %v", err)
+	if err == nil {
+		t.Error("UpdateCheck() expected error for missing repo")
 	}
 }
 

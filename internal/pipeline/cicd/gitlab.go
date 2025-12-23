@@ -1,11 +1,15 @@
 package cicd
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -17,7 +21,9 @@ var (
 )
 
 // GitLabProvider implements the Provider interface for GitLab CI.
+// Fields are ordered for optimal memory alignment.
 type GitLabProvider struct {
+	client *http.Client
 	config ProviderConfig
 }
 
@@ -39,9 +45,16 @@ func WithGitLabSecret(secret string) GitLabOption {
 }
 
 // WithGitLabBaseURL sets the GitLab API base URL (for self-hosted GitLab).
-func WithGitLabBaseURL(url string) GitLabOption {
+func WithGitLabBaseURL(baseURL string) GitLabOption {
 	return func(g *GitLabProvider) {
-		g.config.BaseURL = url
+		g.config.BaseURL = baseURL
+	}
+}
+
+// WithGitLabHTTPClient sets a custom HTTP client.
+func WithGitLabHTTPClient(client *http.Client) GitLabOption {
+	return func(g *GitLabProvider) {
+		g.client = client
 	}
 }
 
@@ -50,6 +63,9 @@ func NewGitLabProvider(opts ...GitLabOption) *GitLabProvider {
 	g := &GitLabProvider{
 		config: ProviderConfig{
 			BaseURL: "https://gitlab.com/api/v4",
+		},
+		client: &http.Client{
+			Timeout: 30 * time.Second,
 		},
 	}
 
@@ -276,21 +292,87 @@ func (g *GitLabProvider) parsePipelineEvent(body []byte) (*Event, error) {
 	}, nil
 }
 
+// gitlabCommitStatusRequest represents a GitLab commit status API request.
+type gitlabCommitStatusRequest struct {
+	State       string `json:"state"`
+	Ref         string `json:"ref,omitempty"`
+	Name        string `json:"name,omitempty"`
+	TargetURL   string `json:"target_url,omitempty"`
+	Description string `json:"description,omitempty"`
+	Coverage    string `json:"coverage,omitempty"`
+	PipelineID  int    `json:"pipeline_id,omitempty"`
+}
+
 // UpdateStatus updates the pipeline status via GitLab API.
 func (g *GitLabProvider) UpdateStatus(ctx context.Context, status RunStatus) error {
 	if ctx == nil {
 		return errors.New("context cannot be nil")
 	}
 
-	// Check context cancellation.
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	// This is a placeholder - actual implementation would make API calls.
+	if g.config.Token == "" {
+		return ErrMissingToken
+	}
+
+	// Extract project and SHA from metadata.
+	project := status.Metadata["project"]
+	sha := status.Metadata["sha"]
+	if project == "" || sha == "" {
+		return errors.New("missing project or sha in status metadata")
+	}
+
+	// URL-encode the project path.
+	encodedProject := url.PathEscape(project)
+
+	req := gitlabCommitStatusRequest{
+		State:       MapStatusToGitLab(status.Status),
+		Name:        status.PipelineRef,
+		Description: truncateGitLabDescription(status.Description),
+		TargetURL:   status.URL,
+	}
+	if req.Name == "" {
+		req.Name = "devsec/pipeline"
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal status request: %w", err)
+	}
+
+	apiURL := fmt.Sprintf("%s/projects/%s/statuses/%s", g.config.BaseURL, encodedProject, sha)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("PRIVATE-TOKEN", g.config.Token)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("GitLab API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
+}
+
+// truncateGitLabDescription truncates description for GitLab (max 255 chars).
+func truncateGitLabDescription(s string) string {
+	if len(s) <= 255 {
+		return s
+	}
+	return s[:252] + "..."
 }
 
 // CreateCheck creates a GitLab commit status.
@@ -303,16 +385,52 @@ func (g *GitLabProvider) CreateCheck(ctx context.Context, event Event, name stri
 		return "", ErrMissingToken
 	}
 
-	// Check context cancellation.
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	default:
 	}
 
-	// This is a placeholder - actual implementation would create commit status via API.
-	checkID := fmt.Sprintf("status_%s_%d", name, time.Now().UnixNano())
-	return checkID, nil
+	if event.Repo == "" || event.SHA == "" {
+		return "", errors.New("missing repo or sha in event")
+	}
+
+	// URL-encode the project path.
+	encodedProject := url.PathEscape(event.Repo)
+
+	req := gitlabCommitStatusRequest{
+		State:       "pending",
+		Name:        name,
+		Description: "Pipeline started",
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal status request: %w", err)
+	}
+
+	apiURL := fmt.Sprintf("%s/projects/%s/statuses/%s", g.config.BaseURL, encodedProject, event.SHA)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("PRIVATE-TOKEN", g.config.Token)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("GitLab API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	// GitLab commit status doesn't return an ID, use name as identifier.
+	return name, nil
 }
 
 // UpdateCheck updates an existing GitLab commit status.
@@ -325,14 +443,57 @@ func (g *GitLabProvider) UpdateCheck(ctx context.Context, checkID string, status
 		return ErrMissingToken
 	}
 
-	// Check context cancellation.
+	if checkID == "" {
+		return errors.New("missing check ID (status name)")
+	}
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	// This is a placeholder - actual implementation would update status via API.
+	project := status.Metadata["project"]
+	sha := status.Metadata["sha"]
+	if project == "" || sha == "" {
+		return errors.New("missing project or sha in status metadata")
+	}
+
+	// URL-encode the project path.
+	encodedProject := url.PathEscape(project)
+
+	req := gitlabCommitStatusRequest{
+		State:       MapStatusToGitLab(status.Status),
+		Name:        checkID,
+		Description: truncateGitLabDescription(status.Description),
+		TargetURL:   status.URL,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal status request: %w", err)
+	}
+
+	apiURL := fmt.Sprintf("%s/projects/%s/statuses/%s", g.config.BaseURL, encodedProject, sha)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("PRIVATE-TOKEN", g.config.Token)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("GitLab API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 

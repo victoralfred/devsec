@@ -10,6 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/victoralfred/devsec/internal/ml"
+	"github.com/victoralfred/devsec/internal/progress"
+	"github.com/victoralfred/devsec/internal/tui"
 	"github.com/victoralfred/gowritter/safepath"
 )
 
@@ -110,6 +112,11 @@ func runMLDetect(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
+	// Use TUI if enabled.
+	if IsProgressEnabled() {
+		return runMLDetectWithTUI(cmd, absPath)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), mlDetectTimeout)
 	defer cancel()
 
@@ -181,6 +188,168 @@ func runMLDetect(cmd *cobra.Command, args []string) error {
 		cmd.Printf("Detection results written to: %s\n", absOutput)
 	} else {
 		cmd.Println(string(output))
+	}
+
+	return nil
+}
+
+// mlDetectResult holds the result of ML detection.
+// Fields ordered for optimal memory alignment.
+type mlDetectResult struct {
+	err    error
+	result *ml.DetectionResult
+	output []byte
+}
+
+// runMLDetectWithTUI runs ML detection with TUI progress display.
+func runMLDetectWithTUI(cmd *cobra.Command, absPath string) error {
+	reporter, events := progress.NewChannelReporter(100)
+
+	tuiModel := tui.NewModel(tui.Config{
+		CommandName: "ml-detect",
+		CommandType: tui.CommandTypeML,
+		Events:      events,
+	})
+
+	// Result channel for capturing the final result.
+	resultChan := make(chan mlDetectResult, 1)
+
+	// Run detection in goroutine.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), mlDetectTimeout)
+		defer cancel()
+
+		// Report stage started.
+		reporter.ReportStageStarted("ml-detection")
+		reporter.ReportLog("info", fmt.Sprintf("Scanning %s for ML frameworks and models...", absPath))
+
+		detector := ml.NewDetector()
+		result, err := detector.Detect(ctx, absPath)
+		if err != nil {
+			reporter.ReportStageCompleted("ml-detection", progress.StatusFailed, 0)
+			reporter.ReportCompleted(nil, fmt.Errorf("detect: %w", err))
+			reporter.Close()
+			resultChan <- mlDetectResult{err: fmt.Errorf("detect: %w", err)}
+			return
+		}
+
+		reporter.ReportStageCompleted("ml-detection", progress.StatusSuccess, 0)
+
+		// Log detection results.
+		reporter.ReportLog("info", fmt.Sprintf("Found %d frameworks, %d models", len(result.Frameworks), len(result.Models)))
+
+		// Format output.
+		var output []byte
+		switch mlDetectFormat {
+		case "json":
+			output, err = result.ToJSON()
+			if err != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("marshal JSON: %w", err))
+				reporter.Close()
+				resultChan <- mlDetectResult{err: fmt.Errorf("marshal JSON: %w", err)}
+				return
+			}
+		case "csv":
+			exporter := ml.NewCSVExporter()
+			output, err = exporter.ExportDetectionResult(result)
+			if err != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("export CSV: %w", err))
+				reporter.Close()
+				resultChan <- mlDetectResult{err: fmt.Errorf("export CSV: %w", err)}
+				return
+			}
+		case "html":
+			exporter := ml.NewHTMLExporter("ML Detection Report")
+			output, err = exporter.ExportDetectionResult(result)
+			if err != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("export HTML: %w", err))
+				reporter.Close()
+				resultChan <- mlDetectResult{err: fmt.Errorf("export HTML: %w", err)}
+				return
+			}
+		case "junit":
+			exporter := ml.NewJUnitExporter("ML Detection")
+			output, err = exporter.ExportDetectionResult(result)
+			if err != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("export JUnit: %w", err))
+				reporter.Close()
+				resultChan <- mlDetectResult{err: fmt.Errorf("export JUnit: %w", err)}
+				return
+			}
+		case "sarif":
+			exporter := ml.DefaultSARIFExporter()
+			report, sarifErr := exporter.ExportDetectionResult(result)
+			if sarifErr != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("export SARIF: %w", sarifErr))
+				reporter.Close()
+				resultChan <- mlDetectResult{err: fmt.Errorf("export SARIF: %w", sarifErr)}
+				return
+			}
+			output, err = report.ToJSON()
+			if err != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("marshal SARIF: %w", err))
+				reporter.Close()
+				resultChan <- mlDetectResult{err: fmt.Errorf("marshal SARIF: %w", err)}
+				return
+			}
+		default:
+			output = []byte(result.Summary())
+		}
+
+		// Write output file if specified.
+		if mlDetectOutput != "" {
+			absOutput, absErr := filepath.Abs(mlDetectOutput)
+			if absErr != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("resolve output path: %w", absErr))
+				reporter.Close()
+				resultChan <- mlDetectResult{err: fmt.Errorf("resolve output path: %w", absErr)}
+				return
+			}
+
+			dir := filepath.Dir(absOutput)
+			filename := filepath.Base(absOutput)
+
+			sp, spErr := safepath.New(dir)
+			if spErr != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("create safepath: %w", spErr))
+				reporter.Close()
+				resultChan <- mlDetectResult{err: fmt.Errorf("create safepath: %w", spErr)}
+				return
+			}
+
+			if writeErr := sp.WriteFile(filename, output, 0o644); writeErr != nil {
+				reporter.ReportCompleted(nil, fmt.Errorf("write output: %w", writeErr))
+				reporter.Close()
+				resultChan <- mlDetectResult{err: fmt.Errorf("write output: %w", writeErr)}
+				return
+			}
+
+			reporter.ReportLog("info", fmt.Sprintf("Detection results written to: %s", absOutput))
+		}
+
+		reporter.ReportCompleted(result, nil)
+		reporter.Close()
+		resultChan <- mlDetectResult{result: result, output: output}
+	}()
+
+	// Run TUI.
+	if tuiErr := tui.Run(tuiModel); tuiErr != nil {
+		res := <-resultChan
+		if res.err != nil {
+			return fmt.Errorf("ML detection failed: %w", res.err)
+		}
+		return fmt.Errorf("TUI error: %w", tuiErr)
+	}
+
+	// Get the result.
+	res := <-resultChan
+	if res.err != nil {
+		return res.err
+	}
+
+	// Print output to stdout if no output file was specified.
+	if mlDetectOutput == "" && len(res.output) > 0 {
+		cmd.Println(string(res.output))
 	}
 
 	return nil

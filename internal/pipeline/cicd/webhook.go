@@ -1,13 +1,17 @@
 package cicd
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -20,7 +24,9 @@ var (
 )
 
 // WebhookProvider implements the Provider interface for generic webhooks.
+// Fields are ordered for optimal memory alignment.
 type WebhookProvider struct {
+	client *http.Client
 	config ProviderConfig
 }
 
@@ -55,6 +61,13 @@ func WithWebhookSkipTLSVerify(skip bool) WebhookOption {
 	}
 }
 
+// WithWebhookHTTPClient sets a custom HTTP client.
+func WithWebhookHTTPClient(client *http.Client) WebhookOption {
+	return func(w *WebhookProvider) {
+		w.client = client
+	}
+}
+
 // NewWebhookProvider creates a new webhook provider.
 func NewWebhookProvider(opts ...WebhookOption) *WebhookProvider {
 	w := &WebhookProvider{
@@ -63,6 +76,20 @@ func NewWebhookProvider(opts ...WebhookOption) *WebhookProvider {
 
 	for _, opt := range opts {
 		opt(w)
+	}
+
+	// Initialize HTTP client if not provided.
+	if w.client == nil {
+		transport := &http.Transport{}
+		if w.config.SkipTLSVerify {
+			transport.TLSClientConfig = &tls.Config{
+				InsecureSkipVerify: true, //#nosec G402 -- User explicitly requested to skip TLS verification
+			}
+		}
+		w.client = &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: transport,
+		}
 	}
 
 	return w
@@ -226,21 +253,95 @@ func (w *WebhookProvider) determineEventType(payload webhookPayload) EventType {
 	}
 }
 
+// webhookStatusPayload represents the payload sent to webhooks.
+type webhookStatusPayload struct {
+	Type        string            `json:"type"`
+	RunID       string            `json:"run_id"`
+	PipelineRef string            `json:"pipeline_ref"`
+	Status      string            `json:"status"`
+	Description string            `json:"description,omitempty"`
+	URL         string            `json:"url,omitempty"`
+	StartTime   string            `json:"start_time"`
+	EndTime     string            `json:"end_time,omitempty"`
+	Duration    string            `json:"duration,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	Stages      []StageStatus     `json:"stages,omitempty"`
+}
+
 // UpdateStatus updates the pipeline status via webhook callback.
 func (w *WebhookProvider) UpdateStatus(ctx context.Context, status RunStatus) error {
 	if ctx == nil {
 		return errors.New("context cannot be nil")
 	}
 
-	// Check context cancellation.
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	// This is a placeholder - actual implementation would POST to webhook URL.
-	// Would use http.Client to send status updates to w.config.WebhookURL.
+	if w.config.WebhookURL == "" {
+		// No webhook URL configured, skip silently.
+		return nil
+	}
+
+	payload := webhookStatusPayload{
+		Type:        "status_update",
+		RunID:       status.RunID,
+		PipelineRef: status.PipelineRef,
+		Status:      MapStatusToWebhook(status.Status),
+		Description: status.Description,
+		URL:         status.URL,
+		StartTime:   status.StartTime.Format(time.RFC3339),
+		Metadata:    status.Metadata,
+		Stages:      status.Stages,
+	}
+	if !status.EndTime.IsZero() {
+		payload.EndTime = status.EndTime.Format(time.RFC3339)
+		payload.Duration = status.Duration.String()
+	}
+
+	return w.sendWebhook(ctx, payload)
+}
+
+// sendWebhook sends a payload to the configured webhook URL.
+func (w *WebhookProvider) sendWebhook(ctx context.Context, payload interface{}) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal webhook payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.config.WebhookURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	// Add custom headers.
+	for key, value := range w.config.Headers {
+		req.Header.Set(key, value)
+	}
+
+	// Add signature if secret is configured.
+	if w.config.Secret != "" {
+		mac := hmac.New(sha256.New, []byte(w.config.Secret))
+		mac.Write(body)
+		signature := hex.EncodeToString(mac.Sum(nil))
+		req.Header.Set("X-Webhook-Signature", "sha256="+signature)
+	}
+
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send webhook: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("webhook error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
@@ -262,21 +363,48 @@ func (w *WebhookProvider) CreateCheck(ctx context.Context, event Event, name str
 	return checkID, nil
 }
 
+// webhookCheckPayload represents a check update payload sent to webhooks.
+// Fields are ordered for optimal memory alignment.
+type webhookCheckPayload struct {
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	Type        string            `json:"type"`
+	CheckID     string            `json:"check_id"`
+	RunID       string            `json:"run_id"`
+	PipelineRef string            `json:"pipeline_ref"`
+	Status      string            `json:"status"`
+	Description string            `json:"description,omitempty"`
+	URL         string            `json:"url,omitempty"`
+}
+
 // UpdateCheck updates an existing check status.
 func (w *WebhookProvider) UpdateCheck(ctx context.Context, checkID string, status RunStatus) error {
 	if ctx == nil {
 		return errors.New("context cannot be nil")
 	}
 
-	// Check context cancellation.
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	// This is a placeholder - actual implementation would POST to webhook URL.
-	return nil
+	if w.config.WebhookURL == "" {
+		// No webhook URL configured, skip silently.
+		return nil
+	}
+
+	payload := webhookCheckPayload{
+		Type:        "check_update",
+		CheckID:     checkID,
+		RunID:       status.RunID,
+		PipelineRef: status.PipelineRef,
+		Status:      MapStatusToWebhook(status.Status),
+		Description: status.Description,
+		URL:         status.URL,
+		Metadata:    status.Metadata,
+	}
+
+	return w.sendWebhook(ctx, payload)
 }
 
 // MapStatusToWebhook converts internal status to webhook status string.
