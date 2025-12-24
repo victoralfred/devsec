@@ -16,6 +16,7 @@ INSTALL_SCRIPT_VERSION="1.0.0"
 REPO="victoralfred/devsec"
 BINARY_NAME="devsec"
 DEFAULT_INSTALL_DIR="/usr/local/bin"
+CLEANUP_DIR=""
 
 # Color output
 RED='\033[0;31m'
@@ -206,7 +207,9 @@ install_binary() {
 
     local tmp_dir
     tmp_dir=$(mktemp -d)
-    trap 'rm -rf "$tmp_dir"' EXIT
+    # Store tmp_dir path for cleanup trap
+    CLEANUP_DIR="$tmp_dir"
+    trap '[ -n "$CLEANUP_DIR" ] && rm -rf "$CLEANUP_DIR"' EXIT
 
     info "Downloading ${archive_name}..."
     if ! download_file "$download_url" "${tmp_dir}/${archive_name}"; then
