@@ -392,7 +392,7 @@ install_semgrep() {
     if command_exists brew; then
         brew install semgrep
     elif command_exists pip3; then
-        pip3 install semgrep
+        pipx install semgrep
     elif command_exists pip; then
         pip install semgrep
     else
