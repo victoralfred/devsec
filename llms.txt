@@ -1,0 +1,59 @@
+# DevSec - MLSecOps Security Pipeline Tool
+
+> MLSecOps security pipeline tool for automated scanning, policy enforcement, compliance mapping, and ML validation in CI/CD pipelines.
+
+## Overview
+
+DevSec is a comprehensive security tool that integrates multiple security scanners, provides OPA-based policy evaluation, and maps findings to compliance frameworks like SOC 2, ISO 27001, and GDPR.
+
+## Key Features
+
+- Security Scanning: Gitleaks (secrets), Semgrep (SAST), Trivy (vulnerabilities), OSV (dependencies)
+- Policy Engine: OPA/Rego-based policy evaluation with custom rules
+- Compliance Mapping: SOC 2, ISO 27001, GDPR framework mapping
+- ML Validation: Framework detection, model cards, data drift, fairness analysis
+- Supply Chain: SBOM generation (SPDX, CycloneDX), artifact signing, SLSA provenance
+- Pipeline Orchestration: YAML-based pipeline execution with parallel stages
+
+## Installation
+
+```bash
+curl -sSL https://raw.githubusercontent.com/victoralfred/devsec/main/install.sh | bash
+```
+
+## Quick Start
+
+```bash
+# Scan for secrets
+devsec scan secrets .
+
+# Scan for vulnerabilities
+devsec scan vulnerabilities .
+
+# Run compliance assessment
+devsec compliance assess . --frameworks soc2,iso27001
+
+# Run full pipeline
+devsec pipeline run
+```
+
+## Documentation
+
+- README: https://github.com/victoralfred/devsec/blob/main/README.md
+- Setup Guide: https://github.com/victoralfred/devsec/blob/main/SETUP.md
+- CLI Reference: https://github.com/victoralfred/devsec/blob/main/README.md#cli-reference
+
+## Repository
+
+- GitHub: https://github.com/victoralfred/devsec
+- Releases: https://github.com/victoralfred/devsec/releases
+- Issues: https://github.com/victoralfred/devsec/issues
+
+## License
+
+MIT License
+
+## Contact
+
+- Issues: https://github.com/victoralfred/devsec/issues
+- Discussions: https://github.com/victoralfred/devsec/discussions
