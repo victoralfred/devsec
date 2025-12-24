@@ -47,13 +47,57 @@ DevSec is a comprehensive security pipeline tool that automates security scannin
   - Prometheus metrics
   - Slack and webhook notifications
 
+## Installation
+
+### Quick Install (Recommended)
+
+**Linux/macOS:**
+```bash
+curl -sSL https://raw.githubusercontent.com/victoralfred/devsec/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/victoralfred/devsec/main/scripts/install.ps1 | iex
+```
+
+### Install Specific Version
+
+```bash
+curl -sSL https://raw.githubusercontent.com/victoralfred/devsec/main/install.sh | bash -s -- -v v1.0.0
+```
+
+### Install Options
+
+| Option | Description |
+|--------|-------------|
+| `-v VERSION` | Install specific version |
+| `-d DIR` | Custom install directory (default: /usr/local/bin) |
+| `-f` | Force overwrite existing installation |
+| `-s` | Skip scanner dependency prompts |
+
+### Build from Source
+
+```bash
+git clone https://github.com/victoralfred/devsec.git
+cd devsec
+make build
+sudo mv bin/devsec /usr/local/bin/
+```
+
+### Scanner Dependencies
+
+DevSec integrates with external security scanners. The install script will prompt to install these, or you can install manually:
+
+| Scanner | Purpose | Install |
+|---------|---------|---------|
+| [Gitleaks](https://github.com/gitleaks/gitleaks) | Secret detection | `brew install gitleaks` |
+| [Semgrep](https://github.com/returntocorp/semgrep) | SAST scanning | `pip3 install semgrep` |
+| [Trivy](https://github.com/aquasecurity/trivy) | Vulnerability scanning | `brew install trivy` |
+
 ## Quick Start
 
 ```bash
-# Install devsec
-make build
-sudo mv bin/devsec /usr/local/bin/
-
 # Scan for secrets
 devsec scan secrets .
 

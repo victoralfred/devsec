@@ -1,0 +1,103 @@
+# GoReleaser configuration for DevSec
+# Documentation: https://goreleaser.com
+version: 2
+project_name: devsec
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+
+builds:
+  - id: devsec
+    main: ./cmd/devsec
+    binary: devsec
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X 'github.com/victoralfred/devsec/internal/cli.Version={{.Version}}'
+      - -X 'github.com/victoralfred/devsec/internal/cli.GitCommit={{.ShortCommit}}'
+      - -X 'github.com/victoralfred/devsec/internal/cli.BuildDate={{.Date}}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+release:
+  github:
+    owner: victoralfred
+    name: devsec
+  draft: false
+  prerelease: auto
+  name_template: "DevSec {{.Version}}"
+  header: |
+    ## DevSec {{.Version}}
+
+    ### Installation
+
+    **Linux/macOS:**
+    ```bash
+    curl -sSL https://raw.githubusercontent.com/victoralfred/devsec/main/install.sh | bash
+    ```
+
+    **Windows (PowerShell):**
+    ```powershell
+    iwr -useb https://raw.githubusercontent.com/victoralfred/devsec/main/scripts/install.ps1 | iex
+    ```
+
+    **Install specific version:**
+    ```bash
+    curl -sSL https://raw.githubusercontent.com/victoralfred/devsec/main/install.sh | bash -s -- -v {{.Version}}
+    ```
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Security
+      regexp: "^.*sec[(\\w)]*:+.*$"
+      order: 2
+    - title: Other
+      order: 999
