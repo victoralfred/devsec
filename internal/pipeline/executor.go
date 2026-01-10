@@ -266,7 +266,15 @@ func (e *DefaultExecutor) executeParallel(
 					return
 				}
 
-				stageResult, err := e.executeStage(ctx, s, opts, completed)
+				// Create snapshot of completed stages for safe concurrent access.
+				completedMu.Lock()
+				completedSnapshot := make(map[string]StageResult, len(completed))
+				for k, v := range completed {
+					completedSnapshot[k] = v
+				}
+				completedMu.Unlock()
+
+				stageResult, err := e.executeStage(ctx, s, opts, completedSnapshot)
 
 				resultMu.Lock()
 				result.Stages = append(result.Stages, stageResult)
