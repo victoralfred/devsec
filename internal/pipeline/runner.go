@@ -103,15 +103,15 @@ func createResult(name string, status StageStatus, startTime time.Time, err erro
 
 // ScanRunner executes scan stages.
 type ScanRunner struct {
+	registry *scanner.Registry
 	BaseRunner
-	registry *scanner.ScannerRegistry
 }
 
 // ScanRunnerOption configures a ScanRunner.
 type ScanRunnerOption func(*ScanRunner)
 
 // WithScannerRegistry sets the scanner registry for the ScanRunner.
-func WithScannerRegistry(registry *scanner.ScannerRegistry) ScanRunnerOption {
+func WithScannerRegistry(registry *scanner.Registry) ScanRunnerOption {
 	return func(r *ScanRunner) {
 		r.registry = registry
 	}

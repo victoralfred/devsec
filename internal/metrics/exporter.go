@@ -7,12 +7,12 @@ import (
 	"github.com/victoralfred/devsec/internal/model"
 )
 
-// MetricsExporter defines the interface for exporting metrics to various backends.
+// Exporter defines the interface for exporting metrics to various backends.
 // Implementations can export to Prometheus, CloudWatch, DataDog, StatsD, etc.
-type MetricsExporter interface {
+type Exporter interface {
 	// Scan metrics.
 	RecordScanStart(scanner string)
-	RecordScanEnd(scanner string, status string, duration time.Duration)
+	RecordScanEnd(scanner, status string, duration time.Duration)
 	RecordScanError(scanner, errorType string)
 	RecordScanInProgress(scanner string, delta int)
 
@@ -52,7 +52,7 @@ func (e *PrometheusExporter) RecordScanStart(scanner string) {
 }
 
 // RecordScanEnd records the end of a scan.
-func (e *PrometheusExporter) RecordScanEnd(scanner string, status string, duration time.Duration) {
+func (e *PrometheusExporter) RecordScanEnd(scanner, status string, duration time.Duration) {
 	e.metrics.ScanInProgress.WithLabelValues(scanner).Dec()
 	e.metrics.ScanDuration.WithLabelValues(scanner, status).Observe(duration.Seconds())
 }
@@ -129,7 +129,7 @@ func NewNoOpExporter() *NoOpExporter {
 func (e *NoOpExporter) RecordScanStart(scanner string) {}
 
 // RecordScanEnd is a no-op.
-func (e *NoOpExporter) RecordScanEnd(scanner string, status string, duration time.Duration) {}
+func (e *NoOpExporter) RecordScanEnd(scanner, status string, duration time.Duration) {}
 
 // RecordScanError is a no-op.
 func (e *NoOpExporter) RecordScanError(scanner, errorType string) {}
@@ -168,11 +168,11 @@ func (e *NoOpExporter) RecordGateCheck(gate, status string, duration time.Durati
 // ExporterRecorder provides a simplified recording interface using an exporter.
 // This wraps the exporter to provide timing helpers.
 type ExporterRecorder struct {
-	exporter MetricsExporter
+	exporter Exporter
 }
 
 // NewExporterRecorder creates a new recorder using the given exporter.
-func NewExporterRecorder(exporter MetricsExporter) *ExporterRecorder {
+func NewExporterRecorder(exporter Exporter) *ExporterRecorder {
 	return &ExporterRecorder{exporter: exporter}
 }
 

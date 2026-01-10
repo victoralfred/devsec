@@ -12,8 +12,8 @@ import (
 
 // DefaultRegistry returns a registry with all built-in scanners registered.
 // Built-in scanners include: gitleaks, semgrep, trivy, osv.
-func DefaultRegistry() *ScannerRegistry {
-	registry := NewScannerRegistry()
+func DefaultRegistry() *Registry {
+	registry := NewRegistry()
 
 	// Register gitleaks scanner.
 	registry.MustRegister("gitleaks", func(timeout time.Duration) (Scanner, error) {
@@ -43,6 +43,6 @@ var globalRegistry = DefaultRegistry()
 
 // GlobalRegistry returns the global default scanner registry.
 // This registry is initialized with all built-in scanners.
-func GlobalRegistry() *ScannerRegistry {
+func GlobalRegistry() *Registry {
 	return globalRegistry
 }
