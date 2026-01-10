@@ -8,6 +8,7 @@ import (
 
 // ManagerConfig holds configuration for the notification manager.
 type ManagerConfig struct {
+	registry        *NotifierRegistry
 	MinSeverity     Severity
 	DefaultTimeout  time.Duration
 	ContinueOnError bool
@@ -37,9 +38,17 @@ func WithMinSeverity(s Severity) ManagerOption {
 	}
 }
 
+// WithRegistry sets the notifier registry for the manager.
+func WithRegistry(registry *NotifierRegistry) ManagerOption {
+	return func(c *ManagerConfig) {
+		c.registry = registry
+	}
+}
+
 // Manager manages multiple notifiers and routes alerts.
 type Manager struct {
 	notifiers []Notifier
+	registry  *NotifierRegistry
 	config    ManagerConfig
 	mu        sync.RWMutex
 }
@@ -56,10 +65,19 @@ func NewManager(opts ...ManagerOption) *Manager {
 		opt(&config)
 	}
 
-	return &Manager{
+	m := &Manager{
 		config:    config,
 		notifiers: make([]Notifier, 0),
 	}
+
+	// Use provided registry or default.
+	if config.registry != nil {
+		m.registry = config.registry
+	} else {
+		m.registry = GlobalRegistry()
+	}
+
+	return m
 }
 
 // AddNotifier adds a notifier to the manager.
@@ -104,6 +122,23 @@ func (m *Manager) Notifiers() []Notifier {
 	result := make([]Notifier, len(m.notifiers))
 	copy(result, m.notifiers)
 	return result
+}
+
+// CreateNotifier creates a notifier from the registry and adds it to the manager.
+// Returns the created notifier or an error if creation fails.
+func (m *Manager) CreateNotifier(name string, config map[string]any) (Notifier, error) {
+	notifier, err := m.registry.Create(name, config)
+	if err != nil {
+		return nil, err
+	}
+
+	m.AddNotifier(notifier)
+	return notifier, nil
+}
+
+// Registry returns the notifier registry.
+func (m *Manager) Registry() *NotifierRegistry {
+	return m.registry
 }
 
 // Send sends an alert to all enabled notifiers.

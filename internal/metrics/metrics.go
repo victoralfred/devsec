@@ -279,3 +279,13 @@ func Default() *Metrics {
 	})
 	return defaultMetrics
 }
+
+// Exporter returns a MetricsExporter that exports to Prometheus.
+func (m *Metrics) Exporter() MetricsExporter {
+	return NewPrometheusExporter(m)
+}
+
+// DefaultExporter returns an exporter using the default metrics instance.
+func DefaultExporter() MetricsExporter {
+	return Default().Exporter()
+}

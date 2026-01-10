@@ -92,11 +92,43 @@ type Logger interface {
 	SetOutput(w io.Writer)
 }
 
+// LogHook processes log entries before they are written.
+// Hooks can modify, filter, or side-effect on log entries.
+type LogHook interface {
+	// Process is called with each log entry before it is written.
+	// Return the (possibly modified) entry to continue, or nil to filter it out.
+	Process(entry *Entry) *Entry
+}
+
+// LogHookFunc is a function adapter for LogHook.
+type LogHookFunc func(entry *Entry) *Entry
+
+// Process implements LogHook.
+func (f LogHookFunc) Process(entry *Entry) *Entry {
+	return f(entry)
+}
+
+// LoggerFactory creates Logger instances.
+// Useful for dependency injection and testing.
+type LoggerFactory interface {
+	// New creates a new Logger with the given options.
+	New(opts ...Option) Logger
+}
+
+// DefaultFactory is the standard JSON logger factory.
+type DefaultFactory struct{}
+
+// New creates a new JSONLogger.
+func (f *DefaultFactory) New(opts ...Option) Logger {
+	return New(opts...)
+}
+
 // JSONLogger implements Logger with JSON output.
 type JSONLogger struct {
 	output        io.Writer
 	fields        Fields
 	correlationID string
+	hooks         []LogHook
 	mu            sync.Mutex
 	level         Level
 	includeCaller bool
@@ -130,6 +162,20 @@ func WithCaller(enabled bool) Option {
 func WithCorrelation(id string) Option {
 	return func(l *JSONLogger) {
 		l.correlationID = id
+	}
+}
+
+// WithHook adds a log hook for processing entries.
+func WithHook(hook LogHook) Option {
+	return func(l *JSONLogger) {
+		l.hooks = append(l.hooks, hook)
+	}
+}
+
+// WithHookFunc adds a function as a log hook.
+func WithHookFunc(fn func(entry *Entry) *Entry) Option {
+	return func(l *JSONLogger) {
+		l.hooks = append(l.hooks, LogHookFunc(fn))
 	}
 }
 
@@ -212,6 +258,22 @@ func (l *JSONLogger) SetOutput(w io.Writer) {
 	l.output = w
 }
 
+// AddHook adds a hook to the logger.
+func (l *JSONLogger) AddHook(hook LogHook) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.hooks = append(l.hooks, hook)
+}
+
+// Hooks returns all registered hooks.
+func (l *JSONLogger) Hooks() []LogHook {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	hooks := make([]LogHook, len(l.hooks))
+	copy(hooks, l.hooks)
+	return hooks
+}
+
 // log writes a log entry.
 func (l *JSONLogger) log(level Level, msg string, err error, fields ...Fields) {
 	if level < l.level {
@@ -248,7 +310,17 @@ func (l *JSONLogger) log(level Level, msg string, err error, fields ...Fields) {
 		entry.Fields = allFields
 	}
 
-	l.write(entry)
+	// Process hooks.
+	entryPtr := &entry
+	for _, hook := range l.hooks {
+		entryPtr = hook.Process(entryPtr)
+		if entryPtr == nil {
+			// Hook filtered out the entry.
+			return
+		}
+	}
+
+	l.write(*entryPtr)
 }
 
 // write serializes and writes the entry.

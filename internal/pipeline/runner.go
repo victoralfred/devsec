@@ -13,10 +13,7 @@ import (
 	"github.com/victoralfred/devsec/internal/policy"
 	"github.com/victoralfred/devsec/internal/progress"
 	"github.com/victoralfred/devsec/internal/report"
-	"github.com/victoralfred/devsec/internal/scanner/gitleaks"
-	"github.com/victoralfred/devsec/internal/scanner/osv"
-	"github.com/victoralfred/devsec/internal/scanner/semgrep"
-	"github.com/victoralfred/devsec/internal/scanner/trivy"
+	"github.com/victoralfred/devsec/internal/scanner"
 	"github.com/victoralfred/goexec"
 	"github.com/victoralfred/gowritter/safepath"
 )
@@ -107,13 +104,36 @@ func createResult(name string, status StageStatus, startTime time.Time, err erro
 // ScanRunner executes scan stages.
 type ScanRunner struct {
 	BaseRunner
+	registry *scanner.ScannerRegistry
+}
+
+// ScanRunnerOption configures a ScanRunner.
+type ScanRunnerOption func(*ScanRunner)
+
+// WithScannerRegistry sets the scanner registry for the ScanRunner.
+func WithScannerRegistry(registry *scanner.ScannerRegistry) ScanRunnerOption {
+	return func(r *ScanRunner) {
+		r.registry = registry
+	}
 }
 
 // NewScanRunner creates a new scan runner.
-func NewScanRunner() *ScanRunner {
-	return &ScanRunner{
+// If no registry is provided via options, the default registry is used.
+func NewScanRunner(opts ...ScanRunnerOption) *ScanRunner {
+	r := &ScanRunner{
 		BaseRunner: BaseRunner{kind: StageKindScan},
 	}
+
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	// Use default registry if none provided.
+	if r.registry == nil {
+		r.registry = scanner.DefaultRegistry()
+	}
+
+	return r
 }
 
 // Run executes a scan stage.
@@ -194,35 +214,9 @@ func countFindingsBySeverity(findings []model.Finding) progress.FindingCount {
 	return count
 }
 
-// runScanner creates and executes the appropriate scanner.
+// runScanner creates and executes the appropriate scanner using the registry.
 func (r *ScanRunner) runScanner(ctx context.Context, scannerType, path string, timeout time.Duration) ([]model.Finding, error) {
-	switch strings.ToLower(scannerType) {
-	case "gitleaks":
-		scanner, err := gitleaks.New(gitleaks.WithTimeout(timeout))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create gitleaks scanner: %w", err)
-		}
-		defer func() { _ = scanner.Close(ctx) }()
-		return scanner.Scan(ctx, path)
-
-	case "semgrep":
-		scanner := semgrep.New(semgrep.WithTimeout(timeout))
-		defer func() { _ = scanner.Close(ctx) }()
-		return scanner.Scan(ctx, path)
-
-	case "trivy":
-		scanner := trivy.New(trivy.WithTimeout(timeout))
-		defer func() { _ = scanner.Close(ctx) }()
-		return scanner.Scan(ctx, path)
-
-	case "osv":
-		scanner := osv.New(osv.WithTimeout(timeout))
-		defer func() { _ = scanner.Close(ctx) }()
-		return scanner.Scan(ctx, path)
-
-	default:
-		return nil, fmt.Errorf("unknown scanner type: %s", scannerType)
-	}
+	return r.registry.RunScanner(ctx, scannerType, path, timeout)
 }
 
 // PolicyRunner executes policy stages.
