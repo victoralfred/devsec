@@ -11,6 +11,43 @@ import (
 	"github.com/victoralfred/gowritter/safepath"
 )
 
+// ensureDirExists creates the directory using safepath, finding an existing ancestor first.
+func ensureDirExists(dir string, perm os.FileMode) error {
+	// Find the first existing ancestor directory.
+	ancestor := dir
+	var toCreate []string
+	for {
+		info, err := os.Stat(ancestor)
+		if err == nil && info.IsDir() {
+			break
+		}
+		toCreate = append([]string{filepath.Base(ancestor)}, toCreate...)
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			// Reached filesystem root.
+			ancestor = parent
+			break
+		}
+		ancestor = parent
+	}
+
+	if len(toCreate) == 0 {
+		return nil // Directory already exists.
+	}
+
+	sp, err := safepath.New(ancestor)
+	if err != nil {
+		return fmt.Errorf("create safepath: %w", err)
+	}
+
+	relPath := filepath.Join(toCreate...)
+	if err := sp.MkdirAll(relPath, perm); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+
+	return nil
+}
+
 // ResultsPersister defines the interface for persisting scan results.
 // Implementations can store results to files, databases, cloud storage, etc.
 type ResultsPersister interface {
@@ -132,7 +169,7 @@ func (p *FilePersister) Persist(ctx context.Context, report *model.Report, forma
 	// Create parent directories if needed.
 	dir := filepath.Dir(outputPath)
 	if p.config.CreateDirs {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := ensureDirExists(dir, 0o755); err != nil {
 			return fmt.Errorf("create directory: %w", err)
 		}
 	}
