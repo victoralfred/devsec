@@ -25,6 +25,7 @@ const (
 // Aggregator combines findings from multiple scanners.
 // Fields ordered for optimal memory alignment.
 type Aggregator struct {
+	persister      ResultsPersister
 	scannerResults map[string]ScannerResult
 	findings       []model.Finding
 	mu             sync.RWMutex
@@ -49,6 +50,14 @@ type AggregatorOption func(*Aggregator)
 func WithDeduplication(enabled bool) AggregatorOption {
 	return func(a *Aggregator) {
 		a.dedupeEnabled = enabled
+	}
+}
+
+// WithPersister sets the results persister for the aggregator.
+// When set, the PersistReport method can be used to save results.
+func WithPersister(persister ResultsPersister) AggregatorOption {
+	return func(a *Aggregator) {
+		a.persister = persister
 	}
 }
 
@@ -302,4 +311,33 @@ func (a *Aggregator) FindingCount() int {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return len(a.findings)
+}
+
+// PersistReport aggregates the report and persists it using the configured persister.
+// Returns an error if no persister is configured.
+func (a *Aggregator) PersistReport(ctx context.Context, format string) error {
+	if a.persister == nil {
+		return fmt.Errorf("no persister configured")
+	}
+
+	report, err := a.Aggregate(ctx)
+	if err != nil {
+		return fmt.Errorf("aggregate report: %w", err)
+	}
+
+	return a.persister.Persist(ctx, report, format)
+}
+
+// SetPersister sets the results persister after creation.
+func (a *Aggregator) SetPersister(persister ResultsPersister) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.persister = persister
+}
+
+// HasPersister returns whether a persister is configured.
+func (a *Aggregator) HasPersister() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.persister != nil
 }
