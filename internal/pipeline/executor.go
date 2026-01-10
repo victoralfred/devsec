@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/victoralfred/devsec/internal/model"
 	"github.com/victoralfred/devsec/internal/progress"
 )
 
@@ -350,11 +351,12 @@ func (e *DefaultExecutor) executeStage(
 		return result, ErrNoRunner
 	}
 
-	// Build input.
+	// Build input with accumulated findings from previous stages.
 	input := RunnerInput{
 		WorkDir:          opts.WorkDir,
 		PreviousResults:  completed,
 		ProgressReporter: opts.ProgressReporter,
+		Findings:         extractFindingsFromCompleted(completed),
 	}
 
 	// Execute stage.
@@ -484,4 +486,38 @@ func (e *DefaultExecutor) determineOverallStatus(stages []StageResult) StageStat
 	default:
 		return StageStatusSuccess
 	}
+}
+
+// extractFindingsFromCompleted extracts all findings from completed stages' artifacts.
+// This allows downstream stages (policy, compliance, report) to access findings
+// from all previous scan stages.
+func extractFindingsFromCompleted(completed map[string]StageResult) []model.Finding {
+	var allFindings []model.Finding
+
+	for _, result := range completed {
+		if result.Artifacts == nil {
+			continue
+		}
+
+		// Check for findings in artifacts.
+		findingsRaw, ok := result.Artifacts["findings"]
+		if !ok {
+			continue
+		}
+
+		// Type assert to []model.Finding.
+		switch findings := findingsRaw.(type) {
+		case []model.Finding:
+			allFindings = append(allFindings, findings...)
+		case []any:
+			// Handle case where findings might be stored as []any.
+			for _, f := range findings {
+				if finding, ok := f.(model.Finding); ok {
+					allFindings = append(allFindings, finding)
+				}
+			}
+		}
+	}
+
+	return allFindings
 }

@@ -370,8 +370,8 @@ github.com/valyala/fastjson v1.6.4 h1:uAUNq9Z6ymTgGhcm0UynUAB6tlbakBrz6CQFax3BXV
 github.com/valyala/fastjson v1.6.4/go.mod h1:CLCAqky6SMuOcxStkYQvblddUtoRxhYMGLrsQns1aXY=
 github.com/vektah/gqlparser/v2 v2.5.31 h1:YhWGA1mfTjID7qJhd1+Vxhpk5HTgydrGU9IgkWBTJ7k=
 github.com/vektah/gqlparser/v2 v2.5.31/go.mod h1:c1I28gSOVNzlfc4WuDlqU7voQnsqI6OG2amkBAFmgts=
-github.com/victoralfred/goexec v0.1.0 h1:jG+nYtJMjxq3rfKrc7G/j+10ojhkYcNK3LUVDMSU87Q=
-github.com/victoralfred/goexec v0.1.0/go.mod h1:3YtOYtxr6OGYccrR0TFkyQDd4RpHHeiWn8fQGMD0Y8Y=
+github.com/victoralfred/goexec v0.2.0 h1:neAdx27nyKQ82V/KU7em+c9ZwiR/r7rt9Q0Z+UB/gfU=
+github.com/victoralfred/goexec v0.2.0/go.mod h1:3YtOYtxr6OGYccrR0TFkyQDd4RpHHeiWn8fQGMD0Y8Y=
 github.com/victoralfred/gowritter v1.0.0 h1:AhDJuz+CMnNPxlc4FxBohsNdNugNKBRelUtWGq1ZgY0=
 github.com/victoralfred/gowritter v1.0.0/go.mod h1:L1DH9z5TJKPRLxwYZ2No3/L1IZ6UP5ULXGSiF4YvfsI=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=

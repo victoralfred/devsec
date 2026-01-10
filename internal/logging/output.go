@@ -128,13 +128,17 @@ func (w *MultiWriter) Add(writer io.Writer) {
 	w.writers = append(w.writers, writer)
 }
 
-// Close closes all writers that implement io.Closer.
+// Close closes all writers that implement io.Closer, except standard streams.
 func (w *MultiWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	var lastErr error
 	for _, writer := range w.writers {
+		// Skip closing standard streams (stdout, stderr, stdin).
+		if writer == os.Stdout || writer == os.Stderr || writer == os.Stdin {
+			continue
+		}
 		if closer, ok := writer.(io.Closer); ok {
 			if err := closer.Close(); err != nil {
 				lastErr = err

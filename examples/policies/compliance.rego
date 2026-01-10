@@ -6,40 +6,39 @@
 
 package devsec.compliance
 
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
 # SOC2 Trust Services Criteria checks
-soc2_violations[msg] {
-    finding := input.findings[_]
+soc2_violations contains msg if {
+    some finding in input.findings
     finding.severity in ["critical", "high"]
     finding.cwe != ""
     msg := sprintf("SOC2 CC6.1 violation: %s (CWE-%s)", [finding.title, finding.cwe])
 }
 
 # ISO 27001 control checks
-iso27001_violations[msg] {
-    finding := input.findings[_]
+iso27001_violations contains msg if {
+    some finding in input.findings
     finding.type == "secret"
     msg := sprintf("ISO 27001 A.9.4.3 violation: Secret in source code - %s", [finding.title])
 }
 
-iso27001_violations[msg] {
-    finding := input.findings[_]
+iso27001_violations contains msg if {
+    some finding in input.findings
     finding.type == "vulnerability"
     finding.severity == "critical"
     msg := sprintf("ISO 27001 A.12.6.1 violation: Critical vulnerability - %s", [finding.title])
 }
 
 # GDPR checks (data protection)
-gdpr_violations[msg] {
-    finding := input.findings[_]
+gdpr_violations contains msg if {
+    some finding in input.findings
     contains(lower(finding.title), "pii")
     msg := sprintf("GDPR Article 32 violation: PII exposure risk - %s", [finding.title])
 }
 
-gdpr_violations[msg] {
-    finding := input.findings[_]
+gdpr_violations contains msg if {
+    some finding in input.findings
     contains(lower(finding.title), "encryption")
     finding.severity in ["critical", "high"]
     msg := sprintf("GDPR Article 32 violation: Encryption issue - %s", [finding.title])

@@ -7,8 +7,7 @@
 
 package devsec.security
 
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
 # Default deny - findings must pass all rules
 default allow := false
@@ -20,41 +19,41 @@ allow if {
 }
 
 # Critical findings (must be zero)
-critical_findings[finding] {
-    finding := input.findings[_]
+critical_findings contains finding if {
+    some finding in input.findings
     finding.severity == "critical"
 }
 
 # High severity findings
-high_findings[finding] {
-    finding := input.findings[_]
+high_findings contains finding if {
+    some finding in input.findings
     finding.severity == "high"
 }
 
 # Medium severity findings (warning only)
-medium_findings[finding] {
-    finding := input.findings[_]
+medium_findings contains finding if {
+    some finding in input.findings
     finding.severity == "medium"
 }
 
 # Secret detection rule - always fail on secrets
-deny[msg] {
-    finding := input.findings[_]
+deny contains msg if {
+    some finding in input.findings
     finding.type == "secret"
     msg := sprintf("Secret detected: %s in %s", [finding.title, finding.file])
 }
 
 # Vulnerability rule - fail on critical CVEs
-deny[msg] {
-    finding := input.findings[_]
+deny contains msg if {
+    some finding in input.findings
     finding.type == "vulnerability"
     finding.severity == "critical"
     msg := sprintf("Critical vulnerability: %s (%s)", [finding.title, finding.cve])
 }
 
 # SAST rule - fail on injection vulnerabilities
-deny[msg] {
-    finding := input.findings[_]
+deny contains msg if {
+    some finding in input.findings
     finding.type == "sast"
     contains(lower(finding.title), "injection")
     msg := sprintf("Injection vulnerability: %s in %s:%d", [finding.title, finding.file, finding.line])
