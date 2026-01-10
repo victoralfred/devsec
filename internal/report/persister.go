@@ -101,8 +101,8 @@ func WithIndent(indent bool) PersisterOption {
 
 // FilePersister persists reports to the filesystem.
 type FilePersister struct {
-	config     PersisterConfig
 	formatters map[string]Formatter
+	config     PersisterConfig
 }
 
 // NewFilePersister creates a new file-based persister.
@@ -163,14 +163,14 @@ func (p *FilePersister) Persist(ctx context.Context, report *model.Report, forma
 	// Ensure extension matches format.
 	ext := formatter.Extension()
 	if filepath.Ext(outputPath) != ext {
-		outputPath = outputPath + ext
+		outputPath += ext
 	}
 
 	// Create parent directories if needed.
 	dir := filepath.Dir(outputPath)
 	if p.config.CreateDirs {
-		if err := ensureDirExists(dir, 0o755); err != nil {
-			return fmt.Errorf("create directory: %w", err)
+		if mkdirErr := ensureDirExists(dir, 0o755); mkdirErr != nil {
+			return fmt.Errorf("create directory: %w", mkdirErr)
 		}
 	}
 
