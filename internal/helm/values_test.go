@@ -158,7 +158,7 @@ func TestValuesClient_Get_NilContext(t *testing.T) {
 	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.Get(nil, "default", "my-release")
 	if err != ErrNilContext {
-		t.Errorf("Get(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Getcontext.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 

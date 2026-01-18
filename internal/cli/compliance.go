@@ -201,7 +201,7 @@ func runComplianceAssessWithTUI(cmd *cobra.Command, absPath string) error {
 		reporter.ReportLog("info", fmt.Sprintf("Scanning %s for security findings...", absPath))
 		findings, err := runQuickScanWithProgress(ctx, absPath, reporter)
 		if err != nil {
-			reporter.ReportCompleted(nil, fmt.Errorf("scan: %w", err))
+			reporter.ReportCompleted(context.TODO(), fmt.Errorf("scan: %w", err))
 			reporter.Close()
 			resultChan <- complianceResult{err: fmt.Errorf("scan: %w", err)}
 			return
@@ -224,7 +224,7 @@ func runComplianceAssessWithTUI(cmd *cobra.Command, absPath string) error {
 		report, err := generator.Generate(ctx, findings, opts)
 		if err != nil {
 			reporter.ReportStageCompleted("compliance-mapping", progress.StatusFailed, 0)
-			reporter.ReportCompleted(nil, fmt.Errorf("generate report: %w", err))
+			reporter.ReportCompleted(context.TODO(), fmt.Errorf("generate report: %w", err))
 			reporter.Close()
 			resultChan <- complianceResult{err: fmt.Errorf("generate report: %w", err)}
 			return
@@ -235,7 +235,7 @@ func runComplianceAssessWithTUI(cmd *cobra.Command, absPath string) error {
 		formatter := compliance.GetFormatter(complianceAssessFormat)
 		output, err := formatter.Format(report)
 		if err != nil {
-			reporter.ReportCompleted(nil, fmt.Errorf("format report: %w", err))
+			reporter.ReportCompleted(context.TODO(), fmt.Errorf("format report: %w", err))
 			reporter.Close()
 			resultChan <- complianceResult{err: fmt.Errorf("format report: %w", err)}
 			return
@@ -245,7 +245,7 @@ func runComplianceAssessWithTUI(cmd *cobra.Command, absPath string) error {
 		if complianceAssessOutput != "" {
 			absOutput, err := filepath.Abs(complianceAssessOutput)
 			if err != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("resolve output path: %w", err))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("resolve output path: %w", err))
 				reporter.Close()
 				resultChan <- complianceResult{err: fmt.Errorf("resolve output path: %w", err)}
 				return
@@ -256,14 +256,14 @@ func runComplianceAssessWithTUI(cmd *cobra.Command, absPath string) error {
 
 			sp, err := safepath.New(dir)
 			if err != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("create safepath: %w", err))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("create safepath: %w", err))
 				reporter.Close()
 				resultChan <- complianceResult{err: fmt.Errorf("create safepath: %w", err)}
 				return
 			}
 
 			if err := sp.WriteFile(filename, output, 0o644); err != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("write output: %w", err))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("write output: %w", err))
 				reporter.Close()
 				resultChan <- complianceResult{err: fmt.Errorf("write output: %w", err)}
 				return

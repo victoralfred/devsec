@@ -36,7 +36,7 @@ func TestPolicyGate_Evaluate_NilContext(t *testing.T) {
 	gate := NewPolicyGate(&mockPolicyEvaluator{})
 	_, err := gate.Evaluate(context.TODO(), GateInput{}) //lint:ignore SA1012 Testing nil context handling
 	if err != ErrNilContext {
-		t.Errorf("Evaluate(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Evaluate(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestPolicyGate_CheckFindings_NilContext(t *testing.T) {
 
 	gate := NewPolicyGate(&mockPolicyEvaluator{})
 	findings := []model.Finding{{ID: "1", Title: "Test"}}
-	_, err := gate.CheckFindings(nil, findings) //lint:ignore SA1012 Testing nil context handling
+	_, err := gate.CheckFindings(context.TODO(), findings) //lint:ignore SA1012 Testing nil context handling
 	if err != ErrNilContext {
 		t.Errorf("CheckFindings(nil) error = %v, want ErrNilContext", err)
 	}
@@ -98,7 +98,7 @@ func TestPolicyGate_CheckFindings_NoFindings(t *testing.T) {
 	ctx := context.Background()
 	_, err := gate.CheckFindings(ctx, nil)
 	if err != ErrNoFindings {
-		t.Errorf("CheckFindings(nil) error = %v, want ErrNoFindings", err)
+		t.Errorf("CheckFindings(context.TODO()) error = %v, want ErrNoFindings", err)
 	}
 }
 
@@ -188,9 +188,9 @@ func TestSeverityGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewSeverityGate()
-	_, err := gate.Evaluate(nil, GateInput{}) //lint:ignore SA1012 Testing nil context handling
+	_, err := gate.Evaluate(context.TODO(), GateInput{}) //lint:ignore SA1012 Testing nil context handling
 	if err != ErrNilContext {
-		t.Errorf("Evaluate(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Evaluate(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -213,9 +213,9 @@ func TestSeverityGate_CheckFindings_NilContext(t *testing.T) {
 
 	gate := NewSeverityGate()
 	findings := []model.Finding{{ID: "1", Title: "Test"}}
-	_, err := gate.CheckFindings(nil, findings) //lint:ignore SA1012 Testing nil context handling
+	_, err := gate.CheckFindings(context.TODO(), findings) //lint:ignore SA1012 Testing nil context handling
 	if err != ErrNilContext {
-		t.Errorf("CheckFindings(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("CheckFindings(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -226,7 +226,7 @@ func TestSeverityGate_CheckFindings_NoFindings(t *testing.T) {
 	ctx := context.Background()
 	_, err := gate.CheckFindings(ctx, nil)
 	if err != ErrNoFindings {
-		t.Errorf("CheckFindings(nil) error = %v, want ErrNoFindings", err)
+		t.Errorf("CheckFindings(context.TODO()) error = %v, want ErrNoFindings", err)
 	}
 }
 
@@ -292,9 +292,9 @@ func TestPreCheckRunner_Run_NilContext(t *testing.T) {
 
 	runner := NewPreCheckRunner()
 	opts := PreCheckOptions{Findings: []model.Finding{{ID: "1", Title: "Test"}}}
-	_, err := runner.Run(nil, opts) //lint:ignore SA1012 Testing nil context handling
+	_, err := runner.Run(context.TODO(), opts) //lint:ignore SA1012 Testing nil context handling
 	if err != ErrNilContext {
-		t.Errorf("Run(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Run(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 

@@ -377,7 +377,7 @@ func TestWebhookProvider_ParseEvent_NilContext(t *testing.T) {
 	w := NewWebhookProvider()
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := w.ParseEvent(nil, []byte(`{}`), map[string]string{})
+	_, err := w.ParseEvent(context.TODO(), []byte(`{}`), map[string]string{})
 	if err == nil {
 		t.Error("ParseEvent() expected error for nil context")
 	}
@@ -468,7 +468,7 @@ func TestWebhookProvider_UpdateStatus_NilContext(t *testing.T) {
 	w := NewWebhookProvider()
 
 	//lint:ignore SA1012 Testing nil context handling
-	err := w.UpdateStatus(nil, RunStatus{})
+	err := w.UpdateStatus(context.TODO(), RunStatus{})
 	if err == nil {
 		t.Error("UpdateStatus() expected error for nil context")
 	}
@@ -496,7 +496,7 @@ func TestWebhookProvider_CreateCheck_NilContext(t *testing.T) {
 	w := NewWebhookProvider()
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := w.CreateCheck(nil, Event{}, "test")
+	_, err := w.CreateCheck(context.TODO(), Event{}, "test")
 	if err == nil {
 		t.Error("CreateCheck() expected error for nil context")
 	}
