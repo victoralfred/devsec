@@ -227,7 +227,7 @@ func TestSlackNotifier_NilContext(t *testing.T) {
 	}
 
 	alert := NewAlert().WithID("test").Build()
-	var ctx context.Context = nil
+	var ctx context.Context = nil    //nolint:revive // explicit nil context for testing error handling
 	err := notifier.Send(ctx, alert) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("expected ErrNilContext, got %v", err)

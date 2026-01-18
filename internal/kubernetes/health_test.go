@@ -142,7 +142,7 @@ func TestHealthClient_CheckPodHealth_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	var ctx context.Context = nil
+	var ctx context.Context = nil                           //nolint:revive // explicit nil context for testing error handling
 	_, err := client.CheckPodHealth(ctx, "default", "test") //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("CheckPodHealth(nil) error = %v, want ErrNilContext", err)
@@ -222,7 +222,7 @@ func TestHealthClient_GetReadiness_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	var ctx context.Context = nil
+	var ctx context.Context = nil                     //nolint:revive // explicit nil context for testing error handling
 	_, err := client.GetReadiness(ctx, "default", "") //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("GetReadiness(nil) error = %v, want ErrNilContext", err)
@@ -272,7 +272,7 @@ func TestHealthClient_GetLiveness_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	var ctx context.Context = nil
+	var ctx context.Context = nil                    //nolint:revive // explicit nil context for testing error handling
 	_, err := client.GetLiveness(ctx, "default", "") //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("GetLiveness(nil) error = %v, want ErrNilContext", err)
@@ -309,7 +309,7 @@ func TestHealthClient_WaitForHealthy_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	var ctx context.Context = nil
+	var ctx context.Context = nil                                     //nolint:revive // explicit nil context for testing error handling
 	err := client.WaitForHealthy(ctx, "default", "test", time.Second) //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("WaitForHealthy(context.TODO()) error = %v, want ErrNilContext", err)

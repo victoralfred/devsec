@@ -40,7 +40,7 @@ func TestHealthGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewHealthGate(&mockKubeClient{})
-	var ctx context.Context = nil
+	var ctx context.Context = nil                                                  //nolint:revive // explicit nil context for testing error handling
 	_, err := gate.Evaluate(ctx, GateInput{Namespace: "default", Resource: "app"}) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Evaluate(context.TODO()) error = %v, want ErrNilContext", err)
@@ -73,7 +73,7 @@ func TestHealthGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewHealthGate(&mockKubeClient{})
-	var ctx context.Context = nil
+	var ctx context.Context = nil                     //nolint:revive // explicit nil context for testing error handling
 	_, err := gate.CheckHealth(ctx, "default", "app") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("CheckHealth(context.TODO()) error = %v, want ErrNilContext", err)
@@ -192,7 +192,7 @@ func TestReadinessGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewReadinessGate(&mockKubeClient{})
-	var ctx context.Context = nil
+	var ctx context.Context = nil                                                  //nolint:revive // explicit nil context for testing error handling
 	_, err := gate.Evaluate(ctx, GateInput{Namespace: "default", Resource: "app"}) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Evaluate(context.TODO()) error = %v, want ErrNilContext", err)
@@ -203,7 +203,7 @@ func TestReadinessGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewReadinessGate(&mockKubeClient{})
-	var ctx context.Context = nil
+	var ctx context.Context = nil                     //nolint:revive // explicit nil context for testing error handling
 	_, err := gate.CheckHealth(ctx, "default", "app") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("CheckHealth(context.TODO()) error = %v, want ErrNilContext", err)
@@ -263,7 +263,7 @@ func TestPostCheckRunner_Run_NilContext(t *testing.T) {
 
 	runner := NewPostCheckRunner()
 	opts := PostCheckOptions{Namespace: "default", ReleaseName: "app"}
-	var ctx context.Context = nil
+	var ctx context.Context = nil   //nolint:revive // explicit nil context for testing error handling
 	_, err := runner.Run(ctx, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Run(context.TODO()) error = %v, want ErrNilContext", err)
@@ -405,7 +405,7 @@ func TestCombinedHealthGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewCombinedHealthGate(&mockKubeClient{}, nil, nil)
-	var ctx context.Context = nil
+	var ctx context.Context = nil                     //nolint:revive // explicit nil context for testing error handling
 	_, err := gate.CheckHealth(ctx, "default", "app") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("CheckHealthcontext.TODO()) error = %v, want ErrNilContext", err)

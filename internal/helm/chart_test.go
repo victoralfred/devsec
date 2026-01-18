@@ -13,7 +13,7 @@ func TestChartClient_Get_NilContext(t *testing.T) {
 
 	client := &defaultChartClient{}
 
-	var ctx context.Context = nil
+	var ctx context.Context = nil               //nolint:revive // explicit nil context for testing error handling
 	_, err := client.Get(ctx, "/path/to/chart") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Get(nil) error = %v, want ErrNilContext", err)
@@ -37,7 +37,7 @@ func TestChartClient_Validate_NilContext(t *testing.T) {
 
 	client := &defaultChartClient{}
 
-	var ctx context.Context = nil
+	var ctx context.Context = nil                 //nolint:revive // explicit nil context for testing error handling
 	err := client.Validate(ctx, "/path/to/chart") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Validate(nil) error = %v, want ErrNilContext", err)
@@ -61,7 +61,7 @@ func TestChartClient_Template_NilContext(t *testing.T) {
 
 	client := &defaultChartClient{}
 
-	var ctx context.Context = nil
+	var ctx context.Context = nil                                    //nolint:revive // explicit nil context for testing error handling
 	_, err := client.Template(ctx, "release", "/path/to/chart", nil) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Template(nil) error = %v, want ErrNilContext", err)

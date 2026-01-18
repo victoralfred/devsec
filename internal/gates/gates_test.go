@@ -62,7 +62,7 @@ func TestDefaultDeploymentGates_PreCheck_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates()
 	opts := PreCheckOptions{Findings: []model.Finding{{ID: "1", Title: "Test"}}}
-	var ctx context.Context = nil
+	var ctx context.Context = nil       //nolint:revive // explicit nil context for testing error handling
 	_, err := gates.PreCheck(ctx, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("PreCheck(nil) error = %v, want ErrNilContext", err)
@@ -108,7 +108,7 @@ func TestDefaultDeploymentGates_PostCheck_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates()
 	opts := PostCheckOptions{Namespace: "default", ReleaseName: "app"}
-	var ctx context.Context = nil
+	var ctx context.Context = nil        //nolint:revive // explicit nil context for testing error handling
 	_, err := gates.PostCheck(ctx, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("PostCheck(nil) error = %v, want ErrNilContext", err)
@@ -157,7 +157,7 @@ func TestDefaultDeploymentGates_Deploy_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates()
 	opts := DeployOptions{ReleaseName: "app", ChartRef: "nginx"}
-	var ctx context.Context = nil
+	var ctx context.Context = nil     //nolint:revive // explicit nil context for testing error handling
 	_, err := gates.Deploy(ctx, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Deploy(nil) error = %v, want ErrNilContext", err)
@@ -366,7 +366,7 @@ func TestDefaultDeploymentGates_Rollback_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates(WithHelmClient(&mockHelmClient{currentRevision: 2}))
 	opts := RollbackOptions{ReleaseName: "app"}
-	var ctx context.Context = nil
+	var ctx context.Context = nil    //nolint:revive // explicit nil context for testing error handling
 	err := gates.Rollback(ctx, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Rollback(nil) error = %v, want ErrNilContext", err)
