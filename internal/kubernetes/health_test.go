@@ -143,9 +143,9 @@ func TestHealthClient_CheckPodHealth_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.CheckPodHealth(nil, "default", "test")
+	_, err := client.CheckPodHealth(context.TODO(), "default", "test")
 	if !errors.Is(err, ErrNilContext) {
-		t.Errorf("CheckPodHealth(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("CheckPodHealth(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -223,9 +223,9 @@ func TestHealthClient_GetReadiness_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.GetReadiness(nil, "default", "")
+	_, err := client.GetReadiness(context.TODO(), "default", "")
 	if !errors.Is(err, ErrNilContext) {
-		t.Errorf("GetReadiness(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("GetReadiness(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -273,9 +273,9 @@ func TestHealthClient_GetLiveness_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.GetLiveness(nil, "default", "")
+	_, err := client.GetLiveness(context.TODO(), "default", "")
 	if !errors.Is(err, ErrNilContext) {
-		t.Errorf("GetLiveness(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("GetLiveness(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 

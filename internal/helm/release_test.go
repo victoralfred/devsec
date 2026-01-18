@@ -192,9 +192,9 @@ func TestReleaseClient_Rollback_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	err := client.Rollback(nil, "release", 1)
+	err := client.Rollback(context.TODO(), "release", 1)
 	if err != ErrNilContext {
-		t.Errorf("Rollback(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Rollback(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -225,9 +225,9 @@ func TestReleaseClient_GetHistory_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.GetHistory(nil, "release")
+	_, err := client.GetHistory(context.TODO(), "release")
 	if err != ErrNilContext {
-		t.Errorf("GetHistory(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("GetHistory(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -255,9 +255,9 @@ func TestReleaseClient_GetStatus_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.GetStatus(nil, "release")
+	_, err := client.GetStatus(context.TODO(), "release")
 	if err != ErrNilContext {
-		t.Errorf("GetStatus(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("GetStatus(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -285,9 +285,9 @@ func TestReleaseClient_WaitForReady_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	err := client.WaitForReady(nil, "release", time.Second)
+	err := client.WaitForReady(context.TODO(), "release", time.Second)
 	if err != ErrNilContext {
-		t.Errorf("WaitForReady(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("WaitForReady(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 

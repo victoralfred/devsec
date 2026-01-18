@@ -26,7 +26,7 @@ func TestLoader_Load(t *testing.T) {
 	t.Run("nil context", func(t *testing.T) {
 		t.Parallel()
 		l := NewLoader()
-		_, err := l.Load(nil, "test.yaml")
+		_, err := l.Load(context.TODO(), "test.yaml")
 		if err != ErrNilContext {
 			t.Errorf("Load() error = %v, want ErrNilContext", err)
 		}

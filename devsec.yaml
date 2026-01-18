@@ -1,0 +1,21 @@
+name: security-scan
+version: 1.0.0
+timeout: 30m0s
+stages:
+    - config:
+        scanner: gitleaks
+      name: secrets
+      kind: scan
+    - config:
+        scanner: semgrep
+      name: sast
+      kind: scan
+      depends_on:
+        - secrets
+    - config:
+        scanner: trivy
+      name: vulnerabilities
+      kind: scan
+      depends_on:
+        - sast
+fail_fast: true

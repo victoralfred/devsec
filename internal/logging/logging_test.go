@@ -333,7 +333,7 @@ func TestFromContext_NilContext(t *testing.T) {
 	t.Parallel()
 
 	//lint:ignore SA1012 Testing nil context handling
-	logger := FromContext(nil)
+	logger := FromContext(context.TODO())
 
 	if logger == nil {
 		t.Error("expected non-nil logger for nil context")
@@ -688,7 +688,7 @@ func TestCorrelationIDFromContext_NilContext(t *testing.T) {
 	t.Parallel()
 
 	//lint:ignore SA1012 Testing nil context handling
-	id := CorrelationIDFromContext(nil)
+	id := CorrelationIDFromContext(context.TODO())
 
 	if id != "" {
 		t.Errorf("expected empty string for nil context, got %v", id)
