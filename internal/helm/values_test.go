@@ -119,7 +119,7 @@ func TestValuesClient_LoadFromFile_NilContext(t *testing.T) {
 
 	client := &defaultValuesClient{}
 
-	_, err := client.LoadFromFile(nil, "/path/to/values.yaml") //lint:ignore SA1012 intentionally passing nil context for testing
+	_, err := client.LoadFromFile(nil, "/path/to/values.yaml") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("LoadFromFile(nil) error = %v, want ErrNilContext", err)
 	}
@@ -156,7 +156,7 @@ func TestValuesClient_Get_NilContext(t *testing.T) {
 		actionConfig: newTestActionConfig(),
 	}
 
-	_, err := client.Get(nil, "default", "my-release") //lint:ignore SA1012 intentionally passing nil context for testing
+	_, err := client.Get(nil, "default", "my-release") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Get(nil) error = %v, want ErrNilContext", err)
 	}
