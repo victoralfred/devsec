@@ -85,8 +85,9 @@ Example pipeline.yaml:
     - name: policy
       kind: policy
       depends_on: [secrets, sast]`,
-		Args: cobra.MaximumNArgs(2),
-		RunE: runPipelineRun,
+		Args:         cobra.MaximumNArgs(2),
+		RunE:         runPipelineRun,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().StringVarP(&pipelineRunOutput, "output", "o", "", "output file for results (default: stdout)")

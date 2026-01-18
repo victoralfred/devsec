@@ -57,8 +57,9 @@ func NewScanSecretsCmd() *cobra.Command {
 using Gitleaks secret detection.
 
 If no path is specified, the current directory is scanned.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runScanSecrets,
+		Args:         cobra.MaximumNArgs(1),
+		RunE:         runScanSecrets,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "output format (text, json)")
@@ -228,8 +229,9 @@ func NewScanSastCmd() *cobra.Command {
 using Semgrep static application security testing (SAST).
 
 If no path is specified, the current directory is scanned.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runScanSast,
+		Args:         cobra.MaximumNArgs(1),
+		RunE:         runScanSast,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "output format (text, json)")
@@ -303,8 +305,9 @@ func NewScanVulnerabilitiesCmd() *cobra.Command {
 using Trivy vulnerability scanner.
 
 If no path is specified, the current directory is scanned.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runScanVulnerabilities,
+		Args:         cobra.MaximumNArgs(1),
+		RunE:         runScanVulnerabilities,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "output format (text, json)")
@@ -435,8 +438,9 @@ using the OSV (Open Source Vulnerabilities) database.
 Supports: go.mod, package.json, requirements.txt
 
 If no path is specified, the current directory is scanned.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runScanDependencies,
+		Args:         cobra.MaximumNArgs(1),
+		RunE:         runScanDependencies,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "output format (text, json)")
