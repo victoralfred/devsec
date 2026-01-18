@@ -137,7 +137,8 @@ func TestDeploymentClient_Get_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	_, err := client.Get(nil, "test") //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	_, err := client.Get(ctx, "test") //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("Get(context.TODO()) error = %v, want ErrNilContext", err)
 	}
@@ -186,7 +187,8 @@ func TestDeploymentClient_List_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	_, err := client.List(nil, "") //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	_, err := client.List(ctx, "") //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("List(context.TODO()) error = %v, want ErrNilContext", err)
 	}
@@ -218,7 +220,8 @@ func TestDeploymentClient_WaitForReady_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	err := client.WaitForReady(nil, "test", time.Second) //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	err := client.WaitForReady(ctx, "test", time.Second) //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("WaitForReady(nil) error = %v, want ErrNilContext", err)
 	}

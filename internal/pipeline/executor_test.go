@@ -109,7 +109,8 @@ func TestExecutor_Execute(t *testing.T) {
 				{Name: "stage1", Kind: StageKindScan, Config: map[string]string{"scanner": "gitleaks"}},
 			},
 		}
-		_, err := e.Execute(nil, p, DefaultExecuteOptions()) //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+		_, err := e.Execute(ctx, p, DefaultExecuteOptions()) //nolint:staticcheck // intentionally passing nil context for testing
 		if err != ErrNilContext {
 			t.Errorf("expected ErrNilContext, got %v", err)
 		}

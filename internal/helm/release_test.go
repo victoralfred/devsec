@@ -17,7 +17,8 @@ func TestReleaseClient_Install_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	_, err := client.Install(nil, "release", "/path/to/chart", InstallOptions{}) //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	_, err := client.Install(ctx, "release", "/path/to/chart", InstallOptions{}) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Install(nil) error = %v, want ErrNilContext", err)
 	}
@@ -61,7 +62,8 @@ func TestReleaseClient_Upgrade_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	_, err := client.Upgrade(nil, "release", "/path/to/chart", UpgradeOptions{}) //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	_, err := client.Upgrade(ctx, "release", "/path/to/chart", UpgradeOptions{}) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Upgrade(nil) error = %v, want ErrNilContext", err)
 	}
@@ -105,7 +107,8 @@ func TestReleaseClient_Get_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	_, err := client.Get(nil, "release") //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	_, err := client.Get(ctx, "release") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Get(nil) error = %v, want ErrNilContext", err)
 	}
@@ -137,7 +140,8 @@ func TestReleaseClient_List_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	_, err := client.List(nil, ListOptions{}) //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	_, err := client.List(ctx, ListOptions{}) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("List(nil) error = %v, want ErrNilContext", err)
 	}
@@ -154,7 +158,8 @@ func TestReleaseClient_Uninstall_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	err := client.Uninstall(nil, "release") //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	err := client.Uninstall(ctx, "release") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Uninstall(nil) error = %v, want ErrNilContext", err)
 	}
@@ -186,7 +191,8 @@ func TestReleaseClient_Rollback_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	err := client.Rollback(nil, "release", 1) //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	err := client.Rollback(ctx, "release", 1) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Rollback(nil) error = %v, want ErrNilContext", err)
 	}
@@ -218,7 +224,8 @@ func TestReleaseClient_GetHistory_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	_, err := client.GetHistory(nil, "release") //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	_, err := client.GetHistory(ctx, "release") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("GetHistory(nil) error = %v, want ErrNilContext", err)
 	}
@@ -247,7 +254,8 @@ func TestReleaseClient_GetStatus_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	_, err := client.GetStatus(nil, "release") //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	_, err := client.GetStatus(ctx, "release") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("GetStatus(nil) error = %v, want ErrNilContext", err)
 	}
@@ -276,7 +284,8 @@ func TestReleaseClient_WaitForReady_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	err := client.WaitForReady(nil, "release", time.Second) //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+	err := client.WaitForReady(ctx, "release", time.Second) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("WaitForReady(nil) error = %v, want ErrNilContext", err)
 	}

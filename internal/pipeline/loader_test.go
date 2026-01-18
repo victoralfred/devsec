@@ -26,7 +26,8 @@ func TestLoader_Load(t *testing.T) {
 	t.Run("nil context", func(t *testing.T) {
 		t.Parallel()
 		l := NewLoader()
-		_, err := l.Load(nil, "test.yaml") //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+		_, err := l.Load(ctx, "test.yaml") //nolint:staticcheck // intentionally passing nil context for testing
 		if err != ErrNilContext {
 			t.Errorf("Load() error = %v, want ErrNilContext", err)
 		}
@@ -167,7 +168,8 @@ func TestLoader_LoadFromBytes(t *testing.T) {
 	t.Run("nil ", func(t *testing.T) {
 		t.Parallel()
 		l := NewLoader()
-		_, err := l.LoadFromBytes(nil, []byte("test")) //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+		_, err := l.LoadFromBytes(ctx, []byte("test")) //nolint:staticcheck // intentionally passing nil context for testing
 		if err != ErrNilContext {
 			t.Errorf("LoadFromBytes() error = %v, want ErrNilContext", err)
 		}
@@ -221,7 +223,8 @@ func TestLoader_FindPipeline(t *testing.T) {
 	t.Run("nil context", func(t *testing.T) {
 		t.Parallel()
 		l := NewLoader()
-		_, err := l.FindPipeline(nil, ".") //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+		_, err := l.FindPipeline(ctx, ".") //nolint:staticcheck // intentionally passing nil context for testing
 		if err != ErrNilContext {
 			t.Errorf("FindPipeline() error = %v, want ErrNilContext", err)
 		}
@@ -317,7 +320,8 @@ func TestLoader_Save(t *testing.T) {
 		t.Parallel()
 		l := NewLoader()
 		p := &Pipeline{Name: "test", Stages: []Stage{{Name: "s", Kind: StageKindScan}}}
-		err := l.Save(nil, p, "test.yaml") //nolint:staticcheck // intentionally passing nil context for testing
+var ctx context.Context = nil
+		err := l.Save(ctx, p, "test.yaml") //nolint:staticcheck // intentionally passing nil context for testing
 		if err != ErrNilContext {
 			t.Errorf("Save() error = %v, want ErrNilContext", err)
 		}
