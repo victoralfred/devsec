@@ -18,9 +18,9 @@ func TestReleaseClient_Install_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.Install(nil, "release", "/path/to/chart", InstallOptions{})
+	_, err := client.Install(context.TODO(), "release", "/path/to/chart", InstallOptions{})
 	if err != ErrNilContext {
-		t.Errorf("Install(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Install(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -63,9 +63,9 @@ func TestReleaseClient_Upgrade_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.Upgrade(nil, "release", "/path/to/chart", UpgradeOptions{})
+	_, err := client.Upgrade(context.TODO(), "release", "/path/to/chart", UpgradeOptions{})
 	if err != ErrNilContext {
-		t.Errorf("Upgrade(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Upgrade(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -108,9 +108,9 @@ func TestReleaseClient_Get_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.Get(nil, "release")
+	_, err := client.Get(context.TODO(), "release")
 	if err != ErrNilContext {
-		t.Errorf("Get(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Get(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -141,9 +141,9 @@ func TestReleaseClient_List_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.List(nil, ListOptions{})
+	_, err := client.List(context.TODO(), ListOptions{})
 	if err != ErrNilContext {
-		t.Errorf("List(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("List(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -159,7 +159,7 @@ func TestReleaseClient_Uninstall_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	err := client.Uninstall(nil, "release")
+	err := client.Uninstall(context.TODO(), "release")
 	if err != ErrNilContext {
 		t.Errorf("Uninstall(nil) error = %v, want ErrNilContext", err)
 	}

@@ -109,7 +109,6 @@ func TestExecutor_Execute(t *testing.T) {
 				{Name: "stage1", Kind: StageKindScan, Config: map[string]string{"scanner": "gitleaks"}},
 			},
 		}
-		//lint:ignore SA1012 Testing nil context handling
 		_, err := e.Execute(context.TODO(), p, DefaultExecuteOptions())
 		if err != ErrNilContext {
 			t.Errorf("expected ErrNilContext, got %v", err)

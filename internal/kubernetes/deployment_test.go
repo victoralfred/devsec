@@ -138,9 +138,9 @@ func TestDeploymentClient_Get_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.Get(nil, "test")
+	_, err := client.Get(context.TODO(), "test")
 	if !errors.Is(err, ErrNilContext) {
-		t.Errorf("Get(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Get(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -188,9 +188,9 @@ func TestDeploymentClient_List_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.List(nil, "")
+	_, err := client.List(context.TODO(), "")
 	if !errors.Is(err, ErrNilContext) {
-		t.Errorf("List(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("List(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -221,7 +221,7 @@ func TestDeploymentClient_WaitForReady_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	err := client.WaitForReady(nil, "test", time.Second)
+	err := client.WaitForReady(context.TODO(), "test", time.Second)
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("WaitForReady(nil) error = %v, want ErrNilContext", err)
 	}

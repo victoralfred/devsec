@@ -40,7 +40,6 @@ func TestHealthGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewHealthGate(&mockKubeClient{})
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.Evaluate(context.TODO(), GateInput{Namespace: "default", Resource: "app"})
 	if err != ErrNilContext {
 		t.Errorf("Evaluate(context.TODO()) error = %v, want ErrNilContext", err)
@@ -73,7 +72,6 @@ func TestHealthGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewHealthGate(&mockKubeClient{})
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.CheckHealth(context.TODO(), "default", "app")
 	if err != ErrNilContext {
 		t.Errorf("CheckHealth(context.TODO()) error = %v, want ErrNilContext", err)
@@ -192,7 +190,6 @@ func TestReadinessGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewReadinessGate(&mockKubeClient{})
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.Evaluate(context.TODO(), GateInput{Namespace: "default", Resource: "app"})
 	if err != ErrNilContext {
 		t.Errorf("Evaluatecontext.TODO()) error = %v, want ErrNilContext", err)
@@ -203,7 +200,6 @@ func TestReadinessGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewReadinessGate(&mockKubeClient{})
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.CheckHealth(context.TODO(), "default", "app")
 	if err != ErrNilContext {
 		t.Errorf("CheckHealth(context.TODO()) error = %v, want ErrNilContext", err)
@@ -263,7 +259,6 @@ func TestPostCheckRunner_Run_NilContext(t *testing.T) {
 
 	runner := NewPostCheckRunner()
 	opts := PostCheckOptions{Namespace: "default", ReleaseName: "app"}
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := runner.Run(context.TODO(), opts)
 	if err != ErrNilContext {
 		t.Errorf("Run(context.TODO()) error = %v, want ErrNilContext", err)
@@ -405,7 +400,6 @@ func TestCombinedHealthGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewCombinedHealthGate(&mockKubeClient{}, nil, nil)
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.CheckHealth(context.TODO(), "default", "app")
 	if err != ErrNilContext {
 		t.Errorf("CheckHealthcontext.TODO()) error = %v, want ErrNilContext", err)

@@ -310,9 +310,9 @@ func TestHealthClient_WaitForHealthy_NilContext(t *testing.T) {
 	}
 
 	//lint:ignore SA1012 Testing nil context handling
-	err := client.WaitForHealthy(nil, "default", "test", time.Second)
+	err := client.WaitForHealthy(context.TODO(), "default", "test", time.Second)
 	if !errors.Is(err, ErrNilContext) {
-		t.Errorf("WaitForHealthy(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("WaitForHealthy(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 

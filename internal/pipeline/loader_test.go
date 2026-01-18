@@ -26,7 +26,6 @@ func TestLoader_Load(t *testing.T) {
 	t.Run("nil context", func(t *testing.T) {
 		t.Parallel()
 		l := NewLoader()
-		//lint:ignore SA1012 Testing nil context handling
 		_, err := l.Load(nil, "test.yaml")
 		if err != ErrNilContext {
 			t.Errorf("Load() error = %v, want ErrNilContext", err)
@@ -168,7 +167,6 @@ func TestLoader_LoadFromBytes(t *testing.T) {
 	t.Run("nil ", func(t *testing.T) {
 		t.Parallel()
 		l := NewLoader()
-		//lint:ignore SA1012 Testing nil context handling
 		_, err := l.LoadFromBytes(context.TODO(), []byte("test"))
 		if err != ErrNilContext {
 			t.Errorf("LoadFromBytes() error = %v, want ErrNilContext", err)
@@ -223,7 +221,6 @@ func TestLoader_FindPipeline(t *testing.T) {
 	t.Run("nil context", func(t *testing.T) {
 		t.Parallel()
 		l := NewLoader()
-		//lint:ignore SA1012 Testing nil context handling
 		_, err := l.FindPipeline(context.TODO(), ".")
 		if err != ErrNilContext {
 			t.Errorf("FindPipeline() error = %v, want ErrNilContext", err)
@@ -320,7 +317,6 @@ func TestLoader_Save(t *testing.T) {
 		t.Parallel()
 		l := NewLoader()
 		p := &Pipeline{Name: "test", Stages: []Stage{{Name: "s", Kind: StageKindScan}}}
-		//lint:ignore SA1012 Testing nil context handling
 		err := l.Save(context.TODO(), p, "test.yaml")
 		if err != ErrNilContext {
 			t.Errorf("Save() error = %v, want ErrNilContext", err)
