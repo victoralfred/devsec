@@ -17,7 +17,6 @@ func TestReleaseClient_Install_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.Install(context.TODO(), "release", "/path/to/chart", InstallOptions{})
 	if err != ErrNilContext {
 		t.Errorf("Install(context.TODO()) error = %v, want ErrNilContext", err)
@@ -62,7 +61,6 @@ func TestReleaseClient_Upgrade_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.Upgrade(context.TODO(), "release", "/path/to/chart", UpgradeOptions{})
 	if err != ErrNilContext {
 		t.Errorf("Upgrade(context.TODO()) error = %v, want ErrNilContext", err)
@@ -107,7 +105,6 @@ func TestReleaseClient_Get_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.Get(context.TODO(), "release")
 	if err != ErrNilContext {
 		t.Errorf("Get(context.TODO()) error = %v, want ErrNilContext", err)
@@ -140,7 +137,6 @@ func TestReleaseClient_List_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.List(context.TODO(), ListOptions{})
 	if err != ErrNilContext {
 		t.Errorf("List(context.TODO()) error = %v, want ErrNilContext", err)
@@ -158,7 +154,6 @@ func TestReleaseClient_Uninstall_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
 	err := client.Uninstall(context.TODO(), "release")
 	if err != ErrNilContext {
 		t.Errorf("Uninstall(nil) error = %v, want ErrNilContext", err)
@@ -191,7 +186,6 @@ func TestReleaseClient_Rollback_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
 	err := client.Rollback(context.TODO(), "release", 1)
 	if err != ErrNilContext {
 		t.Errorf("Rollback(context.TODO()) error = %v, want ErrNilContext", err)
@@ -224,7 +218,6 @@ func TestReleaseClient_GetHistory_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.GetHistory(context.TODO(), "release")
 	if err != ErrNilContext {
 		t.Errorf("GetHistory(context.TODO()) error = %v, want ErrNilContext", err)
@@ -254,7 +247,6 @@ func TestReleaseClient_GetStatus_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.GetStatus(context.TODO(), "release")
 	if err != ErrNilContext {
 		t.Errorf("GetStatus(context.TODO()) error = %v, want ErrNilContext", err)
@@ -284,7 +276,6 @@ func TestReleaseClient_WaitForReady_NilContext(t *testing.T) {
 		namespace:    "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
 	err := client.WaitForReady(context.TODO(), "release", time.Second)
 	if err != ErrNilContext {
 		t.Errorf("WaitForReady(context.TODO()) error = %v, want ErrNilContext", err)

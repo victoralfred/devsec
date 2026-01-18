@@ -13,7 +13,6 @@ func TestChartClient_Get_NilContext(t *testing.T) {
 
 	client := &defaultChartClient{}
 
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.Get(context.TODO(), "/path/to/chart")
 	if err != ErrNilContext {
 		t.Errorf("Get(context.TODO()) error = %v, want ErrNilContext", err)
@@ -37,7 +36,6 @@ func TestChartClient_Validate_NilContext(t *testing.T) {
 
 	client := &defaultChartClient{}
 
-	//lint:ignore SA1012 Testing nil context handling
 	err := client.Validate(context.TODO(), "/path/to/chart")
 	if err != ErrNilContext {
 		t.Errorf("Validate(context.TODO()) error = %v, want ErrNilContext", err)
@@ -61,7 +59,6 @@ func TestChartClient_Template_NilContext(t *testing.T) {
 
 	client := &defaultChartClient{}
 
-	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.Template(context.TODO(), "release", "/path/to/chart", nil)
 	if err != ErrNilContext {
 		t.Errorf("Template(context.TODO()) error = %v, want ErrNilContext", err)
