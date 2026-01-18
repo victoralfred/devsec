@@ -34,7 +34,7 @@ func TestPolicyGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewPolicyGate(&mockPolicyEvaluator{})
-	_, err := gate.Evaluate(nil, GateInput{}) //nolint:staticcheck // intentionally passing nil context for testing
+	_, err := gate.Evaluate(nil, GateInput{}) //lint:ignore SA1012 intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Evaluate(context.TODO()) error = %v, want ErrNilContext", err)
 	}
@@ -73,7 +73,7 @@ func TestPolicyGate_CheckFindings_NilContext(t *testing.T) {
 
 	gate := NewPolicyGate(&mockPolicyEvaluator{})
 	findings := []model.Finding{{ID: "1", Title: "Test"}}
-	_, err := gate.CheckFindings(nil, findings) //nolint:staticcheck // intentionally passing nil context for testing
+	_, err := gate.CheckFindings(nil, findings) //lint:ignore SA1012 intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("CheckFindings(nil) error = %v, want ErrNilContext", err)
 	}
@@ -188,7 +188,7 @@ func TestSeverityGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewSeverityGate()
-	_, err := gate.Evaluate(nil, GateInput{}) //nolint:staticcheck // intentionally passing nil context for testing
+	_, err := gate.Evaluate(nil, GateInput{}) //lint:ignore SA1012 intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Evaluate(context.TODO()) error = %v, want ErrNilContext", err)
 	}
@@ -213,7 +213,7 @@ func TestSeverityGate_CheckFindings_NilContext(t *testing.T) {
 
 	gate := NewSeverityGate()
 	findings := []model.Finding{{ID: "1", Title: "Test"}}
-	_, err := gate.CheckFindings(nil, findings) //nolint:staticcheck // intentionally passing nil context for testing
+	_, err := gate.CheckFindings(nil, findings) //lint:ignore SA1012 intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("CheckFindings(context.TODO()) error = %v, want ErrNilContext", err)
 	}
@@ -292,7 +292,7 @@ func TestPreCheckRunner_Run_NilContext(t *testing.T) {
 
 	runner := NewPreCheckRunner()
 	opts := PreCheckOptions{Findings: []model.Finding{{ID: "1", Title: "Test"}}}
-	_, err := runner.Run(nil, opts) //nolint:staticcheck // intentionally passing nil context for testing
+	_, err := runner.Run(nil, opts) //lint:ignore SA1012 intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Run(context.TODO()) error = %v, want ErrNilContext", err)
 	}
