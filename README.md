@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/victoralfred/devsec/actions/workflows/ci.yml/badge.svg)](https://github.com/victoralfred/devsec/actions/workflows/ci.yml)
 [![Release](https://github.com/victoralfred/devsec/actions/workflows/release.yml/badge.svg)](https://github.com/victoralfred/devsec/actions/workflows/release.yml)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/victoralfred/devsec)](https://go.dev/)
-[![License](https://img.shields.io/github/license/victoralfred/devsec)](LICENSE)
+[![Go](https://github.com/victoralfred/devsec/actions/workflows/go.yml/badge.svg)](https://github.com/victoralfred/devsec/actions/workflows/go.yml)
+[![License Check](https://github.com/victoralfred/devsec/actions/workflows/license.yml/badge.svg)](https://github.com/victoralfred/devsec/actions/workflows/license.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/victoralfred/devsec)](https://goreportcard.com/report/github.com/victoralfred/devsec)
 
 MLSecOps pipeline tool for security scanning, policy enforcement, and compliance.
