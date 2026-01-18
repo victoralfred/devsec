@@ -142,10 +142,9 @@ func TestHealthClient_CheckPodHealth_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.CheckPodHealth(context.TODO(), "default", "test")
+	_, err := client.CheckPodHealth(nil, "default", "test") //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
-		t.Errorf("CheckPodHealth(context.TODO()) error = %v, want ErrNilContext", err)
+		t.Errorf("CheckPodHealth(nil) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -222,10 +221,9 @@ func TestHealthClient_GetReadiness_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.GetReadiness(context.TODO(), "default", "")
+	_, err := client.GetReadiness(nil, "default", "") //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
-		t.Errorf("GetReadiness(context.TODO()) error = %v, want ErrNilContext", err)
+		t.Errorf("GetReadiness(nil) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -272,10 +270,9 @@ func TestHealthClient_GetLiveness_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
-	_, err := client.GetLiveness(context.TODO(), "default", "")
+	_, err := client.GetLiveness(nil, "default", "") //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
-		t.Errorf("GetLiveness(context.TODO()) error = %v, want ErrNilContext", err)
+		t.Errorf("GetLiveness(nil) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -309,8 +306,7 @@ func TestHealthClient_WaitForHealthy_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//lint:ignore SA1012 Testing nil context handling
-	err := client.WaitForHealthy(context.TODO(), "default", "test", time.Second)
+	err := client.WaitForHealthy(nil, "default", "test", time.Second) //nolint:staticcheck // intentionally passing nil context for testing
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("WaitForHealthy(context.TODO()) error = %v, want ErrNilContext", err)
 	}

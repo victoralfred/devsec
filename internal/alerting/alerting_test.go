@@ -223,11 +223,12 @@ func TestSlackNotifier_NilContext(t *testing.T) {
 			WebhookURL: "https://hooks.slack.com/test",
 			Enabled:    true,
 		},
+		client: &http.Client{Timeout: 5 * time.Second},
 	}
 
 	alert := NewAlert().WithID("test").Build()
 
-	err := notifier.Send(context.TODO(), alert)
+	err := notifier.Send(nil, alert) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("expected ErrNilContext, got %v", err)
 	}

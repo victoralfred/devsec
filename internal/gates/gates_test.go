@@ -62,9 +62,9 @@ func TestDefaultDeploymentGates_PreCheck_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates()
 	opts := PreCheckOptions{Findings: []model.Finding{{ID: "1", Title: "Test"}}}
-	_, err := gates.PreCheck(context.TODO(), opts)
+	_, err := gates.PreCheck(nil, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("PreCheck(context.TODO()) error = %v, want ErrNilContext", err)
+		t.Errorf("PreCheck(nil) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -107,9 +107,9 @@ func TestDefaultDeploymentGates_PostCheck_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates()
 	opts := PostCheckOptions{Namespace: "default", ReleaseName: "app"}
-	_, err := gates.PostCheck(context.TODO(), opts)
+	_, err := gates.PostCheck(nil, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("PostCheck(context.TODO()) error = %v, want ErrNilContext", err)
+		t.Errorf("PostCheck(nil) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -155,9 +155,9 @@ func TestDefaultDeploymentGates_Deploy_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates()
 	opts := DeployOptions{ReleaseName: "app", ChartRef: "nginx"}
-	_, err := gates.Deploy(context.TODO(), opts)
+	_, err := gates.Deploy(nil, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("Deploy(context.TODO()) error = %v, want ErrNilContext", err)
+		t.Errorf("Deploy(nil) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -363,9 +363,9 @@ func TestDefaultDeploymentGates_Rollback_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates(WithHelmClient(&mockHelmClient{currentRevision: 2}))
 	opts := RollbackOptions{ReleaseName: "app"}
-	err := gates.Rollback(context.TODO(), opts)
+	err := gates.Rollback(nil, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("Rollback(context.TODO()) error = %v, want ErrNilContext", err)
+		t.Errorf("Rollback(nil) error = %v, want ErrNilContext", err)
 	}
 }
 
