@@ -40,7 +40,7 @@ func TestHealthGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewHealthGate(&mockKubeClient{})
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.Evaluate(nil, GateInput{Namespace: "default", Resource: "app"})
 	if err != ErrNilContext {
 		t.Errorf("Evaluate(nil) error = %v, want ErrNilContext", err)
@@ -73,7 +73,7 @@ func TestHealthGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewHealthGate(&mockKubeClient{})
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.CheckHealth(nil, "default", "app")
 	if err != ErrNilContext {
 		t.Errorf("CheckHealth(nil) error = %v, want ErrNilContext", err)
@@ -192,7 +192,7 @@ func TestReadinessGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewReadinessGate(&mockKubeClient{})
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.Evaluate(nil, GateInput{Namespace: "default", Resource: "app"})
 	if err != ErrNilContext {
 		t.Errorf("Evaluate(nil) error = %v, want ErrNilContext", err)
@@ -203,7 +203,7 @@ func TestReadinessGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewReadinessGate(&mockKubeClient{})
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.CheckHealth(nil, "default", "app")
 	if err != ErrNilContext {
 		t.Errorf("CheckHealth(nil) error = %v, want ErrNilContext", err)
@@ -263,7 +263,7 @@ func TestPostCheckRunner_Run_NilContext(t *testing.T) {
 
 	runner := NewPostCheckRunner()
 	opts := PostCheckOptions{Namespace: "default", ReleaseName: "app"}
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := runner.Run(nil, opts)
 	if err != ErrNilContext {
 		t.Errorf("Run(nil) error = %v, want ErrNilContext", err)
@@ -405,7 +405,7 @@ func TestCombinedHealthGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewCombinedHealthGate(&mockKubeClient{}, nil, nil)
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.CheckHealth(nil, "default", "app")
 	if err != ErrNilContext {
 		t.Errorf("CheckHealth(nil) error = %v, want ErrNilContext", err)

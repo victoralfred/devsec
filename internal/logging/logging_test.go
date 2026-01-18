@@ -332,7 +332,7 @@ func TestFromContext_WithLogger(t *testing.T) {
 func TestFromContext_NilContext(t *testing.T) {
 	t.Parallel()
 
-	//nolint:staticcheck // Testing nil context.
+	//lint:ignore SA1012 Testing nil context handling
 	logger := FromContext(nil)
 
 	if logger == nil {
@@ -687,7 +687,7 @@ func TestFromContext_WithCorrelationID(t *testing.T) {
 func TestCorrelationIDFromContext_NilContext(t *testing.T) {
 	t.Parallel()
 
-	//nolint:staticcheck // Testing nil context.
+	//lint:ignore SA1012 Testing nil context handling
 	id := CorrelationIDFromContext(nil)
 
 	if id != "" {

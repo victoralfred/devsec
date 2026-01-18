@@ -276,7 +276,7 @@ func TestGitHubProvider_ParseEvent_MissingSignature(t *testing.T) {
 func TestGitHubProvider_ParseEvent_NilContext(t *testing.T) {
 	g := NewGitHubProvider()
 
-	//nolint:staticcheck // SA1012: Testing nil context handling
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := g.ParseEvent(nil, []byte(`{}`), map[string]string{})
 	if err == nil {
 		t.Error("ParseEvent() expected error for nil context")
@@ -363,7 +363,7 @@ func TestGitHubProvider_UpdateStatus_MissingMetadata(t *testing.T) {
 func TestGitHubProvider_UpdateStatus_NilContext(t *testing.T) {
 	g := NewGitHubProvider()
 
-	//nolint:staticcheck // SA1012: Testing nil context handling
+	//lint:ignore SA1012 Testing nil context handling
 	err := g.UpdateStatus(nil, RunStatus{})
 	if err == nil {
 		t.Error("UpdateStatus() expected error for nil context")

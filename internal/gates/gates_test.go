@@ -62,7 +62,7 @@ func TestDefaultDeploymentGates_PreCheck_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates()
 	opts := PreCheckOptions{Findings: []model.Finding{{ID: "1", Title: "Test"}}}
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gates.PreCheck(nil, opts)
 	if err != ErrNilContext {
 		t.Errorf("PreCheck(nil) error = %v, want ErrNilContext", err)
@@ -108,7 +108,7 @@ func TestDefaultDeploymentGates_PostCheck_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates()
 	opts := PostCheckOptions{Namespace: "default", ReleaseName: "app"}
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gates.PostCheck(nil, opts)
 	if err != ErrNilContext {
 		t.Errorf("PostCheck(nil) error = %v, want ErrNilContext", err)
@@ -157,7 +157,7 @@ func TestDefaultDeploymentGates_Deploy_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates()
 	opts := DeployOptions{ReleaseName: "app", ChartRef: "nginx"}
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gates.Deploy(nil, opts)
 	if err != ErrNilContext {
 		t.Errorf("Deploy(nil) error = %v, want ErrNilContext", err)
@@ -366,7 +366,7 @@ func TestDefaultDeploymentGates_Rollback_NilContext(t *testing.T) {
 
 	gates, _ := NewDeploymentGates(WithHelmClient(&mockHelmClient{currentRevision: 2}))
 	opts := RollbackOptions{ReleaseName: "app"}
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	err := gates.Rollback(nil, opts)
 	if err != ErrNilContext {
 		t.Errorf("Rollback(nil) error = %v, want ErrNilContext", err)

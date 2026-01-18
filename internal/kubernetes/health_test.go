@@ -142,7 +142,7 @@ func TestHealthClient_CheckPodHealth_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.CheckPodHealth(nil, "default", "test")
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("CheckPodHealth(nil) error = %v, want ErrNilContext", err)
@@ -222,7 +222,7 @@ func TestHealthClient_GetReadiness_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.GetReadiness(nil, "default", "")
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("GetReadiness(nil) error = %v, want ErrNilContext", err)
@@ -272,7 +272,7 @@ func TestHealthClient_GetLiveness_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.GetLiveness(nil, "default", "")
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("GetLiveness(nil) error = %v, want ErrNilContext", err)
@@ -309,7 +309,7 @@ func TestHealthClient_WaitForHealthy_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	err := client.WaitForHealthy(nil, "default", "test", time.Second)
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("WaitForHealthy(nil) error = %v, want ErrNilContext", err)

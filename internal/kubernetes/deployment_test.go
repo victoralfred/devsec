@@ -137,7 +137,7 @@ func TestDeploymentClient_Get_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.Get(nil, "test")
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("Get(nil) error = %v, want ErrNilContext", err)
@@ -187,7 +187,7 @@ func TestDeploymentClient_List_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := client.List(nil, "")
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("List(nil) error = %v, want ErrNilContext", err)
@@ -220,7 +220,7 @@ func TestDeploymentClient_WaitForReady_NilContext(t *testing.T) {
 		namespace: "default",
 	}
 
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	err := client.WaitForReady(nil, "test", time.Second)
 	if !errors.Is(err, ErrNilContext) {
 		t.Errorf("WaitForReady(nil) error = %v, want ErrNilContext", err)

@@ -87,7 +87,7 @@ func TestRollbackHandler_Execute_NilContext(t *testing.T) {
 
 	handler := NewRollbackHandler(&mockHelmClient{currentRevision: 2}, nil)
 	opts := RollbackOptions{ReleaseName: "app", Namespace: "default"}
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	err := handler.Execute(nil, opts)
 	if err != ErrNilContext {
 		t.Errorf("Execute(nil) error = %v, want ErrNilContext", err)
@@ -181,7 +181,7 @@ func TestRollbackHandler_GetPreviousRevision_NilContext(t *testing.T) {
 	t.Parallel()
 
 	handler := NewRollbackHandler(&mockHelmClient{}, nil)
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := handler.GetPreviousRevision(nil, "default", "app")
 	if err != ErrNilContext {
 		t.Errorf("GetPreviousRevision(nil) error = %v, want ErrNilContext", err)
@@ -293,7 +293,7 @@ func TestRollbackHandler_ExecuteWithResult_NilContext(t *testing.T) {
 
 	handler := NewRollbackHandler(&mockHelmClient{}, nil)
 	opts := RollbackOptions{ReleaseName: "app", Namespace: "default"}
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := handler.ExecuteWithResult(nil, opts)
 	if err != ErrNilContext {
 		t.Errorf("ExecuteWithResult(nil) error = %v, want ErrNilContext", err)

@@ -34,7 +34,7 @@ func TestPolicyGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewPolicyGate(&mockPolicyEvaluator{})
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.Evaluate(nil, GateInput{})
 	if err != ErrNilContext {
 		t.Errorf("Evaluate(nil) error = %v, want ErrNilContext", err)
@@ -74,7 +74,7 @@ func TestPolicyGate_CheckFindings_NilContext(t *testing.T) {
 
 	gate := NewPolicyGate(&mockPolicyEvaluator{})
 	findings := []model.Finding{{ID: "1", Title: "Test"}}
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.CheckFindings(nil, findings)
 	if err != ErrNilContext {
 		t.Errorf("CheckFindings(nil) error = %v, want ErrNilContext", err)
@@ -190,7 +190,7 @@ func TestSeverityGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewSeverityGate()
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.Evaluate(nil, GateInput{})
 	if err != ErrNilContext {
 		t.Errorf("Evaluate(nil) error = %v, want ErrNilContext", err)
@@ -216,7 +216,7 @@ func TestSeverityGate_CheckFindings_NilContext(t *testing.T) {
 
 	gate := NewSeverityGate()
 	findings := []model.Finding{{ID: "1", Title: "Test"}}
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := gate.CheckFindings(nil, findings)
 	if err != ErrNilContext {
 		t.Errorf("CheckFindings(nil) error = %v, want ErrNilContext", err)
@@ -296,7 +296,7 @@ func TestPreCheckRunner_Run_NilContext(t *testing.T) {
 
 	runner := NewPreCheckRunner()
 	opts := PreCheckOptions{Findings: []model.Finding{{ID: "1", Title: "Test"}}}
-	//nolint:staticcheck // Testing nil context handling.
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := runner.Run(nil, opts)
 	if err != ErrNilContext {
 		t.Errorf("Run(nil) error = %v, want ErrNilContext", err)

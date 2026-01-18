@@ -308,7 +308,7 @@ func TestGitLabProvider_ParseEvent_MissingToken(t *testing.T) {
 func TestGitLabProvider_ParseEvent_NilContext(t *testing.T) {
 	g := NewGitLabProvider()
 
-	//nolint:staticcheck // SA1012: Testing nil context handling
+	//lint:ignore SA1012 Testing nil context handling
 	_, err := g.ParseEvent(nil, []byte(`{}`), map[string]string{})
 	if err == nil {
 		t.Error("ParseEvent() expected error for nil context")
@@ -421,7 +421,7 @@ func TestGitLabProvider_UpdateStatus_MissingMetadata(t *testing.T) {
 func TestGitLabProvider_UpdateStatus_NilContext(t *testing.T) {
 	g := NewGitLabProvider()
 
-	//nolint:staticcheck // SA1012: Testing nil context handling
+	//lint:ignore SA1012 Testing nil context handling
 	err := g.UpdateStatus(nil, RunStatus{})
 	if err == nil {
 		t.Error("UpdateStatus() expected error for nil context")
