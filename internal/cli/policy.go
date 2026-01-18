@@ -54,7 +54,8 @@ Use --policy to specify a custom Rego policy file.
 
 The findings can be provided via --findings flag pointing to a JSON file
 containing an array of findings from previous scans.`,
-		RunE: runPolicyCheck,
+		RunE:         runPolicyCheck,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().StringVarP(&policyFile, "policy", "p", "", "custom Rego policy file")
