@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -361,11 +362,18 @@ func TestCustomRunner(t *testing.T) {
 		t.Parallel()
 		ctx := context.Background()
 		tmpDir := t.TempDir()
+
+		// Find absolute path to go binary for cross-platform compatibility.
+		goBin, err := exec.LookPath("go")
+		if err != nil {
+			t.Skipf("go binary not found in PATH: %v", err)
+		}
+
 		stage := Stage{
 			Name: "test-custom",
 			Kind: StageKindCustom,
 			Config: map[string]string{
-				"command": "/bin/echo hello",
+				"command": goBin + " version",
 			},
 		}
 		input := RunnerInput{WorkDir: tmpDir}
@@ -407,11 +415,17 @@ func TestCustomRunner(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
+		// Find absolute path to go binary for cross-platform compatibility.
+		goBin, err := exec.LookPath("go")
+		if err != nil {
+			t.Skipf("go binary not found in PATH: %v", err)
+		}
+
 		stage := Stage{
 			Name: "test-custom",
 			Kind: StageKindCustom,
 			Config: map[string]string{
-				"command": "/bin/echo test",
+				"command": goBin + " version",
 			},
 		}
 		input := RunnerInput{}

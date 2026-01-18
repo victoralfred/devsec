@@ -140,15 +140,16 @@ func TestEmptyArrayFile(t *testing.T) {
 
 // TestSpecialCharactersInPaths tests handling of special characters in file paths.
 func TestSpecialCharactersInPaths(t *testing.T) {
+	tmpDir := t.TempDir()
 	tests := []struct {
 		name        string
 		path        string
 		expectError bool
 	}{
-		{"spaces in path", "/tmp/test file.json", false},
-		{"unicode in path", "/tmp/test-文件.json", false},
-		{"newline in path", "/tmp/test\nfile.json", true},
-		{"null byte in path", "/tmp/test\x00file.json", true},
+		{"spaces in path", filepath.Join(tmpDir, "test file.json"), false},
+		{"unicode in path", filepath.Join(tmpDir, "test-文件.json"), false},
+		{"newline in path", filepath.Join(tmpDir, "test\nfile.json"), true},
+		{"null byte in path", filepath.Join(tmpDir, "test\x00file.json"), true},
 	}
 
 	for _, tt := range tests {

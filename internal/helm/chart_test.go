@@ -208,10 +208,14 @@ version: 0.1.0
 		t.Fatalf("failed to create Chart.yaml: %v", err)
 	}
 
-	// Try to package to a nonexistent directory.
-	_, err := PackageChart(chartDir, "/nonexistent/destination")
+	// Try to package to a file instead of a directory (should fail).
+	invalidDestFile := filepath.Join(tmpDir, "file.txt")
+	if err := os.WriteFile(invalidDestFile, []byte("content"), 0o600); err != nil {
+		t.Fatalf("failed to create invalid dest file: %v", err)
+	}
+	_, err := PackageChart(chartDir, invalidDestFile)
 	if err == nil {
-		t.Error("PackageChart to nonexistent destination should fail")
+		t.Error("PackageChart to a file (not directory) should fail")
 	}
 }
 

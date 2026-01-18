@@ -14,18 +14,19 @@ import (
 
 // TestPathTraversalSecurity tests for path traversal vulnerabilities.
 func TestPathTraversalSecurity(t *testing.T) {
+	tmpDir := t.TempDir()
 	tests := []struct {
 		name        string
 		path        string
 		expectError bool
 	}{
 		{"relative path", ".", false},
-		{"absolute path", "/tmp", false},
+		{"absolute path", tmpDir, false},
 		{"path traversal attempt 1", "../../../etc/passwd", true},
 		{"path traversal attempt 2", "..\\..\\..\\windows\\system32", true},
 		{"path with null byte", "test\x00file", true},
 		{"path with newline", "test\nfile", true},
-		{"symlink attempt", "/tmp", false}, // Should resolve to real path
+		{"symlink attempt", tmpDir, false}, // Should resolve to real path
 	}
 
 	for _, tt := range tests {
@@ -134,12 +135,13 @@ func TestInputValidation(t *testing.T) {
 
 // TestContextCancellation tests proper context cancellation handling.
 func TestContextCancellation(t *testing.T) {
+	tmpDir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
 	// Test loadFindings with canceled context and a file path
 	// (empty path returns early before context check, which is valid behavior)
-	findings, err := loadFindings(ctx, "/tmp/test-findings.json")
+	findings, err := loadFindings(ctx, filepath.Join(tmpDir, "test-findings.json"))
 	if err == nil {
 		t.Error("expected error for canceled context")
 	}
@@ -156,7 +158,7 @@ func TestOutputFileSecurity(t *testing.T) {
 		outputPath  string
 		expectError bool
 	}{
-		{"valid path", "/tmp/test.json", false},
+		{"valid path", filepath.Join(tmpDir, "test.json"), false},
 		{"path traversal", "../../../etc/passwd", true},
 		{"absolute path in temp", filepath.Join(tmpDir, "test.json"), false},
 		{"path with special chars", "test\x00file.json", true},
