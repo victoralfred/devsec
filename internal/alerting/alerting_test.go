@@ -227,8 +227,7 @@ func TestSlackNotifier_NilContext(t *testing.T) {
 
 	alert := NewAlert().WithID("test").Build()
 
-	//lint:ignore SA1012 Testing nil context handling
-	err := notifier.Send(nil, alert)
+	err := notifier.Send(context.TODO(), alert) //lint:ignore SA1012 Testing nil context handling
 	if err != ErrNilContext {
 		t.Errorf("expected ErrNilContext, got %v", err)
 	}
