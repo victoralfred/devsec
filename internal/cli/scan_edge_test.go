@@ -148,8 +148,8 @@ func TestSpecialCharactersInPaths(t *testing.T) {
 	}{
 		{"spaces in path", filepath.Join(tmpDir, "test file.json"), false},
 		{"unicode in path", filepath.Join(tmpDir, "test-文件.json"), false},
-		{"newline in path", filepath.Join(tmpDir, "test\nfile.json"), true},
-		{"null byte in path", filepath.Join(tmpDir, "test\x00file.json"), true},
+		{"newline in path", tmpDir + string(filepath.Separator) + "test\nfile.json", true},     //nolint:gocritic // intentionally testing invalid path
+		{"null byte in path", tmpDir + string(filepath.Separator) + "test\x00file.json", true}, //nolint:gocritic // intentionally testing invalid path
 	}
 
 	for _, tt := range tests {
