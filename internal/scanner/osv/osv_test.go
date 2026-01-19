@@ -348,7 +348,7 @@ func TestScanWithMockServer(t *testing.T) {
 	defer server.Close()
 
 	// Create temp directory with go.mod.
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	tmpFile := "test-go.mod"
 
 	sp, err := safepath.New(tmpDir)
@@ -436,7 +436,8 @@ func TestScanContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
 
-	_, err := scanner.Scan(ctx, "/tmp")
+	tmpDir := t.TempDir()
+	_, err := scanner.Scan(ctx, tmpDir)
 	if err == nil {
 		t.Fatal("expected error for canceled context")
 	}
