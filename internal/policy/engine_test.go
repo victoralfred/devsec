@@ -98,7 +98,7 @@ func TestLoadPolicyFromStringInvalid(t *testing.T) {
 
 func TestLoadPolicy(t *testing.T) {
 	// Create temp policy file.
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	policyFile := "test-policy.rego"
 
 	sp, err := safepath.New(tmpDir)
@@ -311,7 +311,7 @@ func TestEvaluateSingle(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temp policy file.
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	policyFile := "test-single-policy.rego"
 
 	sp, spErr := safepath.New(tmpDir)

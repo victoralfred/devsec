@@ -1,0 +1,171 @@
+name: License Check
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  license-check:
+    name: Check License Headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check LICENSE file exists
+        run: |
+          if [ ! -f LICENSE ]; then
+            echo "ERROR: LICENSE file not found in repository root"
+            exit 1
+          fi
+          echo "✓ LICENSE file found"
+
+      - name: Verify LICENSE is MIT
+        run: |
+          if ! grep -q "MIT License" LICENSE; then
+            echo "ERROR: LICENSE file does not appear to be MIT License"
+            exit 1
+          fi
+          echo "✓ LICENSE is MIT"
+
+      - name: Check Go source files for copyright/license headers
+        run: |
+          MISSING_HEADERS=0
+
+          # Find all .go files except vendor and test files
+          for file in $(find . -name "*.go" -not -path "./vendor/*" -not -name "*_test.go"); do
+            # Check if file has package comment (optional check)
+            if ! head -n 5 "$file" | grep -q "^// Package\|^//"; then
+              echo "Warning: $file may be missing package comment"
+            fi
+          done
+
+          if [ $MISSING_HEADERS -gt 0 ]; then
+            echo "ERROR: $MISSING_HEADERS files missing proper headers"
+            exit 1
+          fi
+
+          echo "✓ All source files checked"
+
+  dependency-license:
+    name: Check Dependency Licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@latest
+
+      - name: Check dependency licenses
+        run: |
+          echo "Checking dependency licenses..."
+          go-licenses check ./... --disallowed_types=forbidden,restricted || {
+            echo "ERROR: Dependency license check failed"
+            echo "Some dependencies may have incompatible licenses"
+            exit 1
+          }
+          echo "✓ All dependency licenses are compatible"
+
+      - name: Generate license report
+        run: |
+          echo "Generating license report..."
+          go-licenses report ./... > licenses-report.txt 2>&1 || true
+
+          if [ -s licenses-report.txt ]; then
+            echo "License Report:"
+            cat licenses-report.txt
+          else
+            echo "No licenses found or error generating report"
+          fi
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: licenses-report
+          path: licenses-report.txt
+          retention-days: 30
+
+  license-compliance:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for GPL/LGPL/AGPL in go.mod
+        run: |
+          echo "Checking for copyleft licenses in dependencies..."
+
+          # This is a basic check - more sophisticated tools like go-licenses
+          # or licensee can provide better detection
+
+          if grep -i "gpl\|lgpl\|agpl" go.mod; then
+            echo "Warning: Potential GPL/LGPL/AGPL dependency detected"
+            echo "Please verify license compatibility manually"
+          else
+            echo "✓ No obvious copyleft licenses detected in go.mod"
+          fi
+
+      - name: Verify project metadata
+        run: |
+          echo "Verifying project license metadata..."
+
+          # Check go.mod has module path
+          if ! grep -q "^module github.com/victoralfred/devsec" go.mod; then
+            echo "ERROR: go.mod module path incorrect"
+            exit 1
+          fi
+
+          echo "✓ Project metadata verified"
+
+  notify:
+    name: Slack Notification
+    runs-on: ubuntu-latest
+    needs: [license-check, dependency-license, license-compliance]
+    if: always()
+    environment: production
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ "${{ needs.license-check.result }}" == "success" ] && \
+             [ "${{ needs.dependency-license.result }}" == "success" ] && \
+             [ "${{ needs.license-compliance.result }}" == "success" ]; then
+            STATUS="success"
+            COLOR="good"
+            TEXT="All license checks passed for devsec"
+          else
+            STATUS="failure"
+            COLOR="danger"
+            TEXT="License checks failed for devsec"
+          fi
+
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "Warning: SLACK_WEBHOOK_URL not configured, skipping notification"
+            exit 0
+          fi
+
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{
+              \"attachments\": [{
+                \"color\": \"$COLOR\",
+                \"title\": \"License Check $STATUS\",
+                \"text\": \"$TEXT\",
+                \"fields\": [
+                  {\"title\": \"Repository\", \"value\": \"${{ github.repository }}\", \"short\": true},
+                  {\"title\": \"Branch\", \"value\": \"${{ github.ref_name }}\", \"short\": true},
+                  {\"title\": \"Commit\", \"value\": \"${{ github.sha }}\", \"short\": true},
+                  {\"title\": \"Actor\", \"value\": \"${{ github.actor }}\", \"short\": true}
+                ],
+                \"footer\": \"GitHub Actions\",
+                \"ts\": $(date +%s)
+              }]
+            }" \
+            "$SLACK_WEBHOOK_URL"

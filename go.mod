@@ -14,7 +14,7 @@ require (
 	github.com/scigolib/hdf5 v0.13.1
 	github.com/spf13/cobra v1.10.2
 	github.com/victoralfred/goexec v0.2.0
-	github.com/victoralfred/gowritter v1.0.0
+	github.com/victoralfred/gowritter v1.0.1
 	golang.org/x/term v0.37.0
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v3 v3.19.4

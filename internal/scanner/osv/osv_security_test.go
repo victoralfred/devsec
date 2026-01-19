@@ -10,12 +10,13 @@ import (
 
 // TestOSVScannerSecurity tests security aspects of OSV scanner.
 func TestOSVScannerSecurity(t *testing.T) {
+	tmpDir := t.TempDir()
 	tests := []struct {
 		name        string
 		path        string
 		expectError bool
 	}{
-		{"valid path", "/tmp", false},
+		{"valid path", tmpDir, false},
 		{"path traversal", "../../../etc/passwd", true},
 		{"empty path", "", true},
 		{"relative path", ".", false},

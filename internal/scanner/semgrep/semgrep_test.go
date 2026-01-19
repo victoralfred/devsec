@@ -249,7 +249,7 @@ func TestParseReport(t *testing.T) {
 		t.Fatalf("failed to marshal SARIF: %v", err)
 	}
 
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	tmpFile := "test-semgrep-report.sarif"
 
 	sp, err := safepath.New(tmpDir)
@@ -286,7 +286,7 @@ func TestParseReportEmpty(t *testing.T) {
 	scanner := New()
 	defer closeScanner(t, scanner)
 
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	tmpFile := "test-semgrep-empty.sarif"
 
 	sp, err := safepath.New(tmpDir)
@@ -339,7 +339,7 @@ func TestParseReportEmptyResults(t *testing.T) {
 		t.Fatalf("failed to marshal SARIF: %v", err)
 	}
 
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	tmpFile := "test-semgrep-empty-results.sarif"
 
 	sp, err := safepath.New(tmpDir)
@@ -372,7 +372,7 @@ func TestParseReportInvalidJSON(t *testing.T) {
 	scanner := New()
 	defer closeScanner(t, scanner)
 
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	tmpFile := "test-semgrep-invalid.sarif"
 
 	sp, err := safepath.New(tmpDir)

@@ -258,7 +258,7 @@ func (m *Manager) SendAsync(ctx context.Context, alert Alert) <-chan NotifyResul
 
 // SendBatch sends multiple alerts to all notifiers.
 func (m *Manager) SendBatch(ctx context.Context, alerts []Alert) []NotifyResult {
-	var allResults []NotifyResult
+	allResults := make([]NotifyResult, 0, len(alerts))
 
 	for i := range alerts {
 		results := m.Send(ctx, alerts[i])

@@ -224,7 +224,8 @@ torch.save(model.state_dict(), "checkpoints/model.pth")
 	}
 
 	// Create PyTorch model file (ZIP format for PyTorch >= 1.6).
-	pthData := []byte{0x50, 0x4b, 0x03, 0x04}
+	pthData := make([]byte, 0, 104)
+	pthData = append(pthData, 0x50, 0x4b, 0x03, 0x04)
 	pthData = append(pthData, make([]byte, 100)...)
 	if writeErr := sp.WriteFile(filepath.Join("checkpoints", "model.pth"), pthData, 0o600); writeErr != nil {
 		t.Fatalf("write pth: %v", writeErr)
@@ -561,7 +562,8 @@ output = session.run(None, {input_name: input_data})
 
 	// Create ONNX model file (with magic bytes).
 	// ONNX uses protobuf, files typically start with 0x08 (field 1, varint).
-	onnxData := []byte{0x08, 0x07}
+	onnxData := make([]byte, 0, 102)
+	onnxData = append(onnxData, 0x08, 0x07)
 	onnxData = append(onnxData, make([]byte, 100)...)
 	if writeErr := sp.WriteFile(filepath.Join("models", "model.onnx"), onnxData, 0o600); writeErr != nil {
 		t.Fatalf("write onnx model: %v", writeErr)

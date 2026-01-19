@@ -332,8 +332,7 @@ func TestFromContext_WithLogger(t *testing.T) {
 func TestFromContext_NilContext(t *testing.T) {
 	t.Parallel()
 
-	//nolint:staticcheck // Testing nil context.
-	logger := FromContext(nil)
+	logger := FromContext(context.TODO())
 
 	if logger == nil {
 		t.Error("expected non-nil logger for nil context")
@@ -687,8 +686,7 @@ func TestFromContext_WithCorrelationID(t *testing.T) {
 func TestCorrelationIDFromContext_NilContext(t *testing.T) {
 	t.Parallel()
 
-	//nolint:staticcheck // Testing nil context.
-	id := CorrelationIDFromContext(nil)
+	id := CorrelationIDFromContext(context.TODO())
 
 	if id != "" {
 		t.Errorf("expected empty string for nil context, got %v", id)

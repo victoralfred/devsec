@@ -30,7 +30,7 @@ func (m *mockKubeClient) WaitForReady(_ context.Context, _, _ string, _ time.Dur
 func TestHealthGate_Name(t *testing.T) {
 	t.Parallel()
 
-	gate := NewHealthGate(nil)
+	gate := NewHealthGate(&mockKubeClient{})
 	if gate.Name() != "health" {
 		t.Errorf("Name() = %v, want health", gate.Name())
 	}
@@ -40,10 +40,10 @@ func TestHealthGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewHealthGate(&mockKubeClient{})
-	//nolint:staticcheck // Testing nil context handling.
-	_, err := gate.Evaluate(nil, GateInput{Namespace: "default", Resource: "app"})
+	var ctx context.Context = nil                                                  //nolint:revive // explicit nil context for testing error handling
+	_, err := gate.Evaluate(ctx, GateInput{Namespace: "default", Resource: "app"}) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("Evaluate(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Evaluate(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -73,10 +73,10 @@ func TestHealthGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewHealthGate(&mockKubeClient{})
-	//nolint:staticcheck // Testing nil context handling.
-	_, err := gate.CheckHealth(nil, "default", "app")
+	var ctx context.Context = nil                     //nolint:revive // explicit nil context for testing error handling
+	_, err := gate.CheckHealth(ctx, "default", "app") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("CheckHealth(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("CheckHealth(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -182,7 +182,7 @@ func TestHealthGate_CheckHealth_Error(t *testing.T) {
 func TestReadinessGate_Name(t *testing.T) {
 	t.Parallel()
 
-	gate := NewReadinessGate(nil)
+	gate := NewReadinessGate(&mockKubeClient{})
 	if gate.Name() != "readiness" {
 		t.Errorf("Name() = %v, want readiness", gate.Name())
 	}
@@ -192,10 +192,10 @@ func TestReadinessGate_Evaluate_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewReadinessGate(&mockKubeClient{})
-	//nolint:staticcheck // Testing nil context handling.
-	_, err := gate.Evaluate(nil, GateInput{Namespace: "default", Resource: "app"})
+	var ctx context.Context = nil                                                  //nolint:revive // explicit nil context for testing error handling
+	_, err := gate.Evaluate(ctx, GateInput{Namespace: "default", Resource: "app"}) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("Evaluate(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Evaluate(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -203,10 +203,10 @@ func TestReadinessGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewReadinessGate(&mockKubeClient{})
-	//nolint:staticcheck // Testing nil context handling.
-	_, err := gate.CheckHealth(nil, "default", "app")
+	var ctx context.Context = nil                     //nolint:revive // explicit nil context for testing error handling
+	_, err := gate.CheckHealth(ctx, "default", "app") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("CheckHealth(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("CheckHealth(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -263,10 +263,10 @@ func TestPostCheckRunner_Run_NilContext(t *testing.T) {
 
 	runner := NewPostCheckRunner()
 	opts := PostCheckOptions{Namespace: "default", ReleaseName: "app"}
-	//nolint:staticcheck // Testing nil context handling.
-	_, err := runner.Run(nil, opts)
+	var ctx context.Context = nil   //nolint:revive // explicit nil context for testing error handling
+	_, err := runner.Run(ctx, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("Run(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Run(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -384,7 +384,7 @@ func TestPostCheckRunner_AddGate(t *testing.T) {
 	t.Parallel()
 
 	runner := NewPostCheckRunner()
-	gate := NewHealthGate(nil)
+	gate := NewHealthGate(&mockKubeClient{})
 	runner.AddGate(gate)
 
 	if len(runner.gates) != 1 {
@@ -395,7 +395,7 @@ func TestPostCheckRunner_AddGate(t *testing.T) {
 func TestCombinedHealthGate_Name(t *testing.T) {
 	t.Parallel()
 
-	gate := NewCombinedHealthGate(nil, nil, nil)
+	gate := NewCombinedHealthGate(&mockKubeClient{}, nil, nil)
 	if gate.Name() != "combined-health" {
 		t.Errorf("Name() = %v, want combined-health", gate.Name())
 	}
@@ -405,10 +405,10 @@ func TestCombinedHealthGate_CheckHealth_NilContext(t *testing.T) {
 	t.Parallel()
 
 	gate := NewCombinedHealthGate(&mockKubeClient{}, nil, nil)
-	//nolint:staticcheck // Testing nil context handling.
-	_, err := gate.CheckHealth(nil, "default", "app")
+	var ctx context.Context = nil                     //nolint:revive // explicit nil context for testing error handling
+	_, err := gate.CheckHealth(ctx, "default", "app") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("CheckHealth(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("CheckHealthcontext.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 

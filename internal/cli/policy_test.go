@@ -301,10 +301,10 @@ func TestRunPolicyCheckContextTimeout(t *testing.T) {
 
 	// This test verifies that context timeouts are handled
 	// The actual timeout is set in runPolicyCheck
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	time.Sleep(10 * time.Nanosecond)
+	time.Sleep(10 * time.Millisecond)
 
 	if ctx.Err() == nil {
 		t.Error("expected context to be canceled")

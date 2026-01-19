@@ -503,7 +503,7 @@ type SPDXRelation struct {
 // buildSPDX builds an SPDX document from the SBOM.
 func buildSPDX(sbom *SBOM) *SPDXDocument {
 	packages := make([]SPDXPackage, 0, len(sbom.Components))
-	relationships := make([]SPDXRelation, 0)
+	relationships := make([]SPDXRelation, 0, 1+len(sbom.Components))
 
 	// Add document relationship.
 	relationships = append(relationships, SPDXRelation{

@@ -376,8 +376,8 @@ func TestWebhookProvider_ParseEvent_InvalidPayload(t *testing.T) {
 func TestWebhookProvider_ParseEvent_NilContext(t *testing.T) {
 	w := NewWebhookProvider()
 
-	//nolint:staticcheck // SA1012: Testing nil context handling
-	_, err := w.ParseEvent(nil, []byte(`{}`), map[string]string{})
+	var ctx context.Context = nil                                  //nolint:revive // explicit nil context for testing error handling
+	_, err := w.ParseEvent(ctx, []byte(`{}`), map[string]string{}) //nolint:staticcheck // intentionally passing nil context for testing
 	if err == nil {
 		t.Error("ParseEvent() expected error for nil context")
 	}
@@ -467,8 +467,8 @@ func TestWebhookProvider_UpdateStatus(t *testing.T) {
 func TestWebhookProvider_UpdateStatus_NilContext(t *testing.T) {
 	w := NewWebhookProvider()
 
-	//nolint:staticcheck // SA1012: Testing nil context handling
-	err := w.UpdateStatus(nil, RunStatus{})
+	var ctx context.Context = nil           //nolint:revive // explicit nil context for testing error handling
+	err := w.UpdateStatus(ctx, RunStatus{}) //nolint:staticcheck // intentionally passing nil context for testing
 	if err == nil {
 		t.Error("UpdateStatus() expected error for nil context")
 	}
@@ -495,8 +495,8 @@ func TestWebhookProvider_CreateCheck(t *testing.T) {
 func TestWebhookProvider_CreateCheck_NilContext(t *testing.T) {
 	w := NewWebhookProvider()
 
-	//nolint:staticcheck // SA1012: Testing nil context handling
-	_, err := w.CreateCheck(nil, Event{}, "test")
+	var ctx context.Context = nil                 //nolint:revive // explicit nil context for testing error handling
+	_, err := w.CreateCheck(ctx, Event{}, "test") //nolint:staticcheck // intentionally passing nil context for testing
 	if err == nil {
 		t.Error("CreateCheck() expected error for nil context")
 	}
@@ -519,8 +519,8 @@ func TestWebhookProvider_UpdateCheck(t *testing.T) {
 func TestWebhookProvider_UpdateCheck_NilContext(t *testing.T) {
 	w := NewWebhookProvider()
 
-	//nolint:staticcheck // SA1012: Testing nil context handling
-	err := w.UpdateCheck(nil, "check123", RunStatus{})
+	var ctx context.Context = nil                        //nolint:revive // explicit nil context for testing error handling
+	err := w.UpdateCheck(ctx, "webhook123", RunStatus{}) //nolint:staticcheck // intentionally passing nil context for testing
 	if err == nil {
 		t.Error("UpdateCheck() expected error for nil context")
 	}

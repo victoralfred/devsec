@@ -227,7 +227,7 @@ func runMLDetectWithTUI(cmd *cobra.Command, absPath string) error {
 		result, err := detector.Detect(ctx, absPath)
 		if err != nil {
 			reporter.ReportStageCompleted("ml-detection", progress.StatusFailed, 0)
-			reporter.ReportCompleted(nil, fmt.Errorf("detect: %w", err))
+			reporter.ReportCompleted(context.TODO(), fmt.Errorf("detect: %w", err))
 			reporter.Close()
 			resultChan <- mlDetectResult{err: fmt.Errorf("detect: %w", err)}
 			return
@@ -244,7 +244,7 @@ func runMLDetectWithTUI(cmd *cobra.Command, absPath string) error {
 		case "json":
 			output, err = result.ToJSON()
 			if err != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("marshal JSON: %w", err))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("marshal JSON: %w", err))
 				reporter.Close()
 				resultChan <- mlDetectResult{err: fmt.Errorf("marshal JSON: %w", err)}
 				return
@@ -253,7 +253,7 @@ func runMLDetectWithTUI(cmd *cobra.Command, absPath string) error {
 			exporter := ml.NewCSVExporter()
 			output, err = exporter.ExportDetectionResult(result)
 			if err != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("export CSV: %w", err))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("export CSV: %w", err))
 				reporter.Close()
 				resultChan <- mlDetectResult{err: fmt.Errorf("export CSV: %w", err)}
 				return
@@ -262,7 +262,7 @@ func runMLDetectWithTUI(cmd *cobra.Command, absPath string) error {
 			exporter := ml.NewHTMLExporter("ML Detection Report")
 			output, err = exporter.ExportDetectionResult(result)
 			if err != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("export HTML: %w", err))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("export HTML: %w", err))
 				reporter.Close()
 				resultChan <- mlDetectResult{err: fmt.Errorf("export HTML: %w", err)}
 				return
@@ -271,7 +271,7 @@ func runMLDetectWithTUI(cmd *cobra.Command, absPath string) error {
 			exporter := ml.NewJUnitExporter("ML Detection")
 			output, err = exporter.ExportDetectionResult(result)
 			if err != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("export JUnit: %w", err))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("export JUnit: %w", err))
 				reporter.Close()
 				resultChan <- mlDetectResult{err: fmt.Errorf("export JUnit: %w", err)}
 				return
@@ -280,14 +280,14 @@ func runMLDetectWithTUI(cmd *cobra.Command, absPath string) error {
 			exporter := ml.DefaultSARIFExporter()
 			report, sarifErr := exporter.ExportDetectionResult(result)
 			if sarifErr != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("export SARIF: %w", sarifErr))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("export SARIF: %w", sarifErr))
 				reporter.Close()
 				resultChan <- mlDetectResult{err: fmt.Errorf("export SARIF: %w", sarifErr)}
 				return
 			}
 			output, err = report.ToJSON()
 			if err != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("marshal SARIF: %w", err))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("marshal SARIF: %w", err))
 				reporter.Close()
 				resultChan <- mlDetectResult{err: fmt.Errorf("marshal SARIF: %w", err)}
 				return
@@ -300,7 +300,7 @@ func runMLDetectWithTUI(cmd *cobra.Command, absPath string) error {
 		if mlDetectOutput != "" {
 			absOutput, absErr := filepath.Abs(mlDetectOutput)
 			if absErr != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("resolve output path: %w", absErr))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("resolve output path: %w", absErr))
 				reporter.Close()
 				resultChan <- mlDetectResult{err: fmt.Errorf("resolve output path: %w", absErr)}
 				return
@@ -311,14 +311,14 @@ func runMLDetectWithTUI(cmd *cobra.Command, absPath string) error {
 
 			sp, spErr := safepath.New(dir)
 			if spErr != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("create safepath: %w", spErr))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("create safepath: %w", spErr))
 				reporter.Close()
 				resultChan <- mlDetectResult{err: fmt.Errorf("create safepath: %w", spErr)}
 				return
 			}
 
 			if writeErr := sp.WriteFile(filename, output, 0o644); writeErr != nil {
-				reporter.ReportCompleted(nil, fmt.Errorf("write output: %w", writeErr))
+				reporter.ReportCompleted(context.TODO(), fmt.Errorf("write output: %w", writeErr))
 				reporter.Close()
 				resultChan <- mlDetectResult{err: fmt.Errorf("write output: %w", writeErr)}
 				return

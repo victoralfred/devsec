@@ -1535,13 +1535,14 @@ func TestExtractONNXMetadataWithProducer(t *testing.T) {
 	// Field 2, wire type 2 (length-delimited): tag = (2 << 3) | 2 = 0x12
 	// producer_name = "pytorch"
 	producerName := "pytorch"
-	onnxContent := []byte{
+	producerVersion := "1.12.0"
+	onnxContent := make([]byte, 0, 4+len(producerName)+2+len(producerVersion))
+	onnxContent = append(onnxContent,
 		0x08, 0x07, // Field 1 (ir_version): varint 7
 		0x12, byte(len(producerName)), // Field 2 (producer_name): length prefix
-	}
+	)
 	onnxContent = append(onnxContent, []byte(producerName)...)
 	// Add producer_version (field 3)
-	producerVersion := "1.12.0"
 	onnxContent = append(onnxContent, 0x1a, byte(len(producerVersion))) // Field 3: tag 0x1a
 	onnxContent = append(onnxContent, []byte(producerVersion)...)
 
@@ -1576,10 +1577,11 @@ func TestExtractONNXMetadataWithDomain(t *testing.T) {
 	// Create ONNX file with domain (field 4).
 	// Field 4, wire type 2: tag = (4 << 3) | 2 = 0x22
 	domain := "ai.onnx"
-	onnxContent := []byte{
+	onnxContent := make([]byte, 0, 4+len(domain))
+	onnxContent = append(onnxContent,
 		0x08, 0x08, // Field 1 (ir_version): varint 8
 		0x22, byte(len(domain)), // Field 4 (domain): length prefix
-	}
+	)
 	onnxContent = append(onnxContent, []byte(domain)...)
 
 	if writeErr := sp.WriteFile("model.onnx", onnxContent, 0o600); writeErr != nil {
@@ -1679,10 +1681,11 @@ func TestExtractKerasModelHints(t *testing.T) {
 	}
 
 	// Create HDF5 file with Keras hints in data.
-	h5Content := []byte{
+	h5Content := make([]byte, 0, 60)
+	h5Content = append(h5Content,
 		0x89, 0x48, 0x44, 0x46, 0x0d, 0x0a, 0x1a, 0x0a, // HDF5 signature
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Padding
-	}
+	)
 	// Add keras version string.
 	h5Content = append(h5Content, []byte("keras_version2.12.0model_configmodel_weights")...)
 

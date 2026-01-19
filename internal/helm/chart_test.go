@@ -13,8 +13,8 @@ func TestChartClient_Get_NilContext(t *testing.T) {
 
 	client := &defaultChartClient{}
 
-	//nolint:staticcheck // Testing nil context handling.
-	_, err := client.Get(nil, "/path/to/chart")
+	var ctx context.Context = nil               //nolint:revive // explicit nil context for testing error handling
+	_, err := client.Get(ctx, "/path/to/chart") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Get(nil) error = %v, want ErrNilContext", err)
 	}
@@ -37,8 +37,8 @@ func TestChartClient_Validate_NilContext(t *testing.T) {
 
 	client := &defaultChartClient{}
 
-	//nolint:staticcheck // Testing nil context handling.
-	err := client.Validate(nil, "/path/to/chart")
+	var ctx context.Context = nil                 //nolint:revive // explicit nil context for testing error handling
+	err := client.Validate(ctx, "/path/to/chart") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Validate(nil) error = %v, want ErrNilContext", err)
 	}
@@ -61,8 +61,8 @@ func TestChartClient_Template_NilContext(t *testing.T) {
 
 	client := &defaultChartClient{}
 
-	//nolint:staticcheck // Testing nil context handling.
-	_, err := client.Template(nil, "release", "/path/to/chart", nil)
+	var ctx context.Context = nil                                    //nolint:revive // explicit nil context for testing error handling
+	_, err := client.Template(ctx, "release", "/path/to/chart", nil) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
 		t.Errorf("Template(nil) error = %v, want ErrNilContext", err)
 	}
@@ -208,10 +208,14 @@ version: 0.1.0
 		t.Fatalf("failed to create Chart.yaml: %v", err)
 	}
 
-	// Try to package to a nonexistent directory.
-	_, err := PackageChart(chartDir, "/nonexistent/destination")
+	// Try to package to a file instead of a directory (should fail).
+	invalidDestFile := filepath.Join(tmpDir, "file.txt")
+	if err := os.WriteFile(invalidDestFile, []byte("content"), 0o600); err != nil {
+		t.Fatalf("failed to create invalid dest file: %v", err)
+	}
+	_, err := PackageChart(chartDir, invalidDestFile)
 	if err == nil {
-		t.Error("PackageChart to nonexistent destination should fail")
+		t.Error("PackageChart to a file (not directory) should fail")
 	}
 }
 

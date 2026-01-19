@@ -218,7 +218,7 @@ func TestDecisionPointWithCustomPolicy(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temp policy file.
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	policyFile := "test-custom-policy.rego"
 
 	sp, err := safepath.New(tmpDir)

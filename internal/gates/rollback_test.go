@@ -87,10 +87,10 @@ func TestRollbackHandler_Execute_NilContext(t *testing.T) {
 
 	handler := NewRollbackHandler(&mockHelmClient{currentRevision: 2}, nil)
 	opts := RollbackOptions{ReleaseName: "app", Namespace: "default"}
-	//nolint:staticcheck // Testing nil context handling.
-	err := handler.Execute(nil, opts)
+	var ctx context.Context = nil     //nolint:revive // explicit nil context for testing error handling
+	err := handler.Execute(ctx, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("Execute(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("Execute(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -181,10 +181,10 @@ func TestRollbackHandler_GetPreviousRevision_NilContext(t *testing.T) {
 	t.Parallel()
 
 	handler := NewRollbackHandler(&mockHelmClient{}, nil)
-	//nolint:staticcheck // Testing nil context handling.
-	_, err := handler.GetPreviousRevision(nil, "default", "app")
+	var ctx context.Context = nil                                //nolint:revive // explicit nil context for testing error handling
+	_, err := handler.GetPreviousRevision(ctx, "default", "app") //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("GetPreviousRevision(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("GetPreviousRevision(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
@@ -293,10 +293,10 @@ func TestRollbackHandler_ExecuteWithResult_NilContext(t *testing.T) {
 
 	handler := NewRollbackHandler(&mockHelmClient{}, nil)
 	opts := RollbackOptions{ReleaseName: "app", Namespace: "default"}
-	//nolint:staticcheck // Testing nil context handling.
-	_, err := handler.ExecuteWithResult(nil, opts)
+	var ctx context.Context = nil                  //nolint:revive // explicit nil context for testing error handling
+	_, err := handler.ExecuteWithResult(ctx, opts) //nolint:staticcheck // intentionally passing nil context for testing
 	if err != ErrNilContext {
-		t.Errorf("ExecuteWithResult(nil) error = %v, want ErrNilContext", err)
+		t.Errorf("ExecuteWithResult(context.TODO()) error = %v, want ErrNilContext", err)
 	}
 }
 
