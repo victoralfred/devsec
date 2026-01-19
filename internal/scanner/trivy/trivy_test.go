@@ -199,7 +199,7 @@ func TestParseReport(t *testing.T) {
 		t.Fatalf("failed to marshal report: %v", err)
 	}
 
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	tmpFile := "test-trivy-report.json"
 
 	sp, err := safepath.New(tmpDir)
@@ -236,7 +236,7 @@ func TestParseReportEmpty(t *testing.T) {
 	scanner := New()
 	defer closeScanner(t, scanner)
 
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	tmpFile := "test-trivy-empty.json"
 
 	sp, err := safepath.New(tmpDir)
@@ -287,7 +287,7 @@ func TestParseReportNoVulnerabilities(t *testing.T) {
 		t.Fatalf("failed to marshal report: %v", err)
 	}
 
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	tmpFile := "test-trivy-no-vulns.json"
 
 	sp, err := safepath.New(tmpDir)
@@ -320,7 +320,7 @@ func TestParseReportInvalidJSON(t *testing.T) {
 	scanner := New()
 	defer closeScanner(t, scanner)
 
-	tmpDir := "/tmp"
+	tmpDir := t.TempDir()
 	tmpFile := "test-trivy-invalid.json"
 
 	sp, err := safepath.New(tmpDir)
