@@ -187,15 +187,15 @@ func TestOutputFileSecurity(t *testing.T) {
 // TestTimeoutHandling tests timeout behavior.
 func TestTimeoutHandling(t *testing.T) {
 	// Test with very short timeout
-	shortTimeout := 1 * time.Nanosecond
+	shortTimeout := 1 * time.Millisecond
 	timeout = shortTimeout
 	defer func() { timeout = 5 * time.Minute }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
 	defer cancel()
 
-	// Wait for timeout
-	time.Sleep(10 * time.Nanosecond)
+	// Wait for timeout with some buffer
+	time.Sleep(10 * time.Millisecond)
 
 	// Test that context is properly canceled
 	if ctx.Err() == nil {
